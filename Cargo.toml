@@ -1,0 +1,15 @@
+[package]
+name = "BPspice"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Junzhuo <zhou@junzhuo.site>"]
+keywords = ["eda"]
+description = "reserve name"
+readme = "README.md"
+repository = "https://github.com/zao111222333/bpspice"
+documentation = "https://docs.rs/bpspice"
+categories = ["development-tools"]
+
+
+[dependencies]
