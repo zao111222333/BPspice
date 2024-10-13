@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "bpspice",
-    "bpspice-analysis",
-    "bpspice-circuit",
-    "bpspice-device",
-    "bpspice-parser",
-    "bpspice-py",
-    "bpspice-solver"
+    "gspice",
+    "gspice-analysis",
+    "gspice-circuit",
+    "gspice-device",
+    "gspice-parser",
+    "gspice-py",
+    "gspice-solver"
 ]
 
 [workspace.package]
@@ -17,14 +17,16 @@ authors = ["Junzhuo <zhou@junzhuo.site>"]
 keywords = ["eda", "SPICE"]
 description = "TODO"
 readme = "README.md"
-repository = "https://github.com/zao111222333/bpspice"
-documentation = "https://docs.rs/bpspice"
+repository = "https://github.com/zao111222333/gspice"
+documentation = "https://docs.rs/gspice"
 categories = ["development-tools"]
 
 [workspace.dependencies]
-bpspice          = { path = "bpspice" }
-bpspice-analysis = { path = "bpspice-analysis" }
-bpspice-circuit  = { path = "bpspice-circuit" }
-bpspice-device   = { path = "bpspice-device" }
-bpspice-parser   = { path = "bpspice-parser" }
-bpspice-solver   = { path = "bpspice-solver" }
+gspice          = { path = "gspice" }
+gspice-analysis = { path = "gspice-analysis" }
+gspice-circuit  = { path = "gspice-circuit" }
+gspice-device   = { path = "gspice-device" }
+gspice-parser   = { path = "gspice-parser" }
+gspice-solver   = { path = "gspice-solver" }
+
+candle-core = "0.7"

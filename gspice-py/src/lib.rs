@@ -3,14 +3,18 @@ use pyo3::prelude::*;
 /// Formats the sum of two numbers as string.
 #[pyfunction]
 fn add(a: usize, b: usize) -> PyResult<usize> {
-    Ok(bpspice::add(a, b))
+    Ok(gspice::add(a, b))
 }
+
+#[pyclass]
+struct Ckt {}
 
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
-#[pymodule(name = "bpspice")]
+#[pymodule(name = "gspice")]
 fn pymodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add, m)?)?;
+    m.add_class::<Ckt>()?;
     Ok(())
 }

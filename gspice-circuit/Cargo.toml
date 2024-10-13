@@ -1,5 +1,5 @@
 [package]
-name = "bpspice-analysis"
+name = "gspice-circuit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

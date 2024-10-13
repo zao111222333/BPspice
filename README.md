@@ -1,3 +1,3 @@
-# BPspice: Gradient <ins>B</ins>ackward <ins>P</ins>ropagation <ins>SPICE</ins> simulator
+# GSPICE: <ins>G</ins>radient Descent Capable <ins>SPICE</ins> Simulator
 
 TODO
