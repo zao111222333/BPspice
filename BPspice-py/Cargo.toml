@@ -1,13 +1,13 @@
 [package]
-name = "BPspice-py"
+name = "bpspice-py"
 version.workspace = true
 edition.workspace = true
 publish = false
 
 [lib]
-name = "BPspice"
+name = "bpspice"
 crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.22.4", features = ["extension-module"] }
-BPspice = { workspace = true }
+bpspice = { workspace = true }

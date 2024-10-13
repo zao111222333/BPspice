@@ -1,30 +1,30 @@
 [workspace]
 members = [
-    "BPspice",
-    "BPspice-analysis",
-    "BPspice-circuit",
-    "BPspice-device",
-    "BPspice-parser",
-    "BPspice-py",
-    "BPspice-solver"
+    "bpspice",
+    "bpspice-analysis",
+    "bpspice-circuit",
+    "bpspice-device",
+    "bpspice-parser",
+    "bpspice-py",
+    "bpspice-solver"
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 authors = ["Junzhuo <zhou@junzhuo.site>"]
 keywords = ["eda", "SPICE"]
 description = "TODO"
 readme = "README.md"
-repository = "https://github.com/zao111222333/BPspice"
-documentation = "https://docs.rs/BPspice"
+repository = "https://github.com/zao111222333/bpspice"
+documentation = "https://docs.rs/bpspice"
 categories = ["development-tools"]
 
 [workspace.dependencies]
-BPspice          = { path = "BPspice" }
-BPspice-analysis = { path = "BPspice-analysis" }
-BPspice-circuit  = { path = "BPspice-circuit" }
-BPspice-device   = { path = "BPspice-device" }
-BPspice-parser   = { path = "BPspice-parser" }
-BPspice-solver   = { path = "BPspice-solver" }
+bpspice          = { path = "bpspice" }
+bpspice-analysis = { path = "bpspice-analysis" }
+bpspice-circuit  = { path = "bpspice-circuit" }
+bpspice-device   = { path = "bpspice-device" }
+bpspice-parser   = { path = "bpspice-parser" }
+bpspice-solver   = { path = "bpspice-solver" }

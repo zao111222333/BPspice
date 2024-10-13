@@ -1,5 +1,5 @@
 [package]
-name = "BPspice-parser"
+name = "bpspice-parser"
 version = { workspace = true}
 edition = { workspace = true}
 license = { workspace = true}
