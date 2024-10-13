@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1,<2"]
+build-backend = "maturin"
+
+[project]
+name = "BPspice"
+version = "0.1.0"
+classifiers = []
+requires-python = ">=3.7"
+
+[project.optional-dependencies]
+dev = ["pytest"]
