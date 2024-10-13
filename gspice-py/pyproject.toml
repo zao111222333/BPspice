@@ -3,7 +3,7 @@ requires = ["maturin>=1,<2"]
 build-backend = "maturin"
 
 [project]
-name = "Gspice"
+name = "gspice"
 version = "0.1.0"
 classifiers = []
 requires-python = ">=3.7"
