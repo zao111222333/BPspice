@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::{collections::HashMap, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct GradId(usize);
@@ -11,6 +11,16 @@ impl GradId {
     }
 }
 
+/// A store for gradients, associating a scalar id to the corresponding gradient scalar, used for back propagation.
+#[derive(Debug)]
+pub struct GradStore(HashMap<GradId, Vec<f64>>);
+
+impl GradStore {
+    /// Create a new gradient store
+    fn new() -> Self {
+        GradStore(HashMap::new())
+    }
+}
 // impl Expression {
 //     fn sorted_nodes(&self) -> Vec<&Expression> {
 //         // The vec of sorted nodes is passed as an owned value rather than a mutable reference

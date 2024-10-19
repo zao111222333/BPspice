@@ -13,4 +13,4 @@ categories.workspace = true
 
 [dependencies]
 arcstr.workspace = true
-gspice.workspace = true
+gspice-utils.workspace = true

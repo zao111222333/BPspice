@@ -21,11 +21,11 @@ impl Tensor {
         *write = values;
         self.change_marker().mark_searched_change();
     }
+    pub fn values(&self) -> &RwLock<Vec<f64>> {
+        &self.0 .1
+    }
     fn grad_id(&self) -> &Option<GradId> {
         &self.0 .0
-    }
-    fn values(&self) -> &RwLock<Vec<f64>> {
-        &self.0 .1
     }
     fn change_marker(&self) -> &ChangeMarker {
         &self.0 .2
@@ -48,15 +48,8 @@ pub enum ScalarTensor<'a> {
 }
 
 impl Expression {
-    pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
-        use recompute::RecomputeScalarTensor;
-        match self.recompute() {
-            RecomputeScalarTensor::Scalar(x) => ScalarTensor::Scalar(x),
-            RecomputeScalarTensor::TensorNoChange(tensor)
-            | RecomputeScalarTensor::TensorChanged(tensor) => {
-                ScalarTensor::Tensor(tensor)
-            }
-        }
+    pub fn constant(value: f64) -> Self {
+        Self::Const(value)
     }
     pub fn parameter(values: Vec<f64>, need_grad: bool) -> (Self, Tensor) {
         let tensor = Tensor(Arc::new((
@@ -66,7 +59,7 @@ impl Expression {
         )));
         (Self::Parameter(tensor.clone()), tensor)
     }
-    pub fn constant(value: f64) -> Self {
-        Self::Const(value)
+    pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
+        self.recompute().into()
     }
 }

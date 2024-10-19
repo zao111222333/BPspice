@@ -22,6 +22,18 @@ impl fmt::Display for Expression {
     }
 }
 
+// impl From<f64> for Expression {
+//     fn from(value: f64) -> Self {
+//         Self::constant(value)
+//     }
+// }
+
+// impl From<Vec<f64>> for Expression {
+//     fn from(value: Vec<f64>) -> Self {
+//         Self::parameter(value, true)
+//     }
+// }
+
 // impl PartialEq for Tensor {
 //     fn eq(&self, other: &Self) -> bool {
 //         let lhs_v = self.values().read().unwrap();

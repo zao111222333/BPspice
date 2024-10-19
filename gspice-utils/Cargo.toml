@@ -1,5 +1,5 @@
 [package]
-name = "gspice"
+name = "gspice-utils"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,4 +12,5 @@ documentation.workspace = true
 categories.workspace = true
 
 [dependencies]
-gspice-utils.workspace = true
+candle-core.workspace = true
+ordered-float.workspace = true

@@ -7,8 +7,8 @@ members = [
     "gspice-device",
     "gspice-parser",
     "gspice-py",
-    "gspice-solver"
-]
+    "gspice-solver", 
+    "gspice-utils"]
 
 [workspace.package]
 version = "0.1.1"
@@ -29,6 +29,7 @@ gspice-circuit  = { path = "gspice-circuit" }
 gspice-device   = { path = "gspice-device" }
 gspice-parser   = { path = "gspice-parser" }
 gspice-solver   = { path = "gspice-solver" }
+gspice-utils    = { path = "gspice-utils" }
 
 candle-core = "0.7"
 arcstr = { version = "1.2", features = ["serde"] }

@@ -1,5 +1,5 @@
 #![cfg(test)]
-use gspice::{Expression, before_update};
+use gspice_utils::{Expression, before_update};
 use std::ops::*;
 
 #[test]
