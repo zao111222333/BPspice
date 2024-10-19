@@ -136,9 +136,11 @@ impl UnaryOp {
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
         match node.recompute() {
-            RecomputeScalarTensor::Scalar(_) => todo!(),
-            RecomputeScalarTensor::TensorNoChange(_) => todo!(),
-            RecomputeScalarTensor::TensorChanged(_) => todo!(),
+            RecomputeScalarTensor::Scalar(_) => unreachable!(),
+            RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
+            RecomputeScalarTensor::TensorChanged(node) => {
+                RecomputeScalarTensor::change(tensor, node.iter_unary_op(self.op_fn()))
+            }
         }
     }
 }

@@ -12,4 +12,4 @@ documentation.workspace = true
 categories.workspace = true
 
 [dependencies]
-candle-core = { workspace = true }
+candle-core.workspace = true

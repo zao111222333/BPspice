@@ -12,5 +12,5 @@ documentation.workspace = true
 categories.workspace = true
 
 [dependencies]
-arcstr = { workspace = true }
-gspice = { workspace = true }
+arcstr.workspace = true
+gspice.workspace = true

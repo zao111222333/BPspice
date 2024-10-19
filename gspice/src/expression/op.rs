@@ -2,6 +2,30 @@ use std::sync::{Arc, RwLock};
 
 use super::{ChangeMarker, Expression, GradId, Tensor};
 
+#[derive(Clone, Debug)]
+pub enum Op {
+    // Copy(Expression),
+    Powf(Expression, f64),
+    // (op1 cmp_op op2)? op3 : op4
+    Cond(Expression, CmpOp, Expression, Expression, Expression),
+    Cmp(Expression, CmpOp),
+    Unary(Expression, UnaryOp),
+    Binary(Expression, Expression, BinaryOp),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Le,
+    Ge,
+    Lt,
+    Gt,
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////   UnaryOp   ////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UnaryOp {
     Neg,
@@ -21,6 +45,234 @@ pub enum UnaryOp {
     Erf,
 }
 
+trait UnaryOpT {
+    const OP: UnaryOp;
+    fn op_fn(x: f64) -> f64;
+}
+
+struct Neg;
+impl UnaryOpT for Neg {
+    const OP: UnaryOp = UnaryOp::Neg;
+    fn op_fn(x: f64) -> f64 {
+        -x
+    }
+}
+impl<'a> core::ops::Neg for &'a Expression {
+    type Output = Expression;
+
+    fn neg(self) -> Self::Output {
+        Expression::unary_op::<Neg>(&self)
+    }
+}
+
+struct Sin;
+impl UnaryOpT for Sin {
+    const OP: UnaryOp = UnaryOp::Sin;
+    fn op_fn(x: f64) -> f64 {
+        x.sin()
+    }
+}
+struct Cos;
+impl UnaryOpT for Cos {
+    const OP: UnaryOp = UnaryOp::Cos;
+    fn op_fn(x: f64) -> f64 {
+        x.cos()
+    }
+}
+struct Tanh;
+impl UnaryOpT for Tanh {
+    const OP: UnaryOp = UnaryOp::Tanh;
+    fn op_fn(x: f64) -> f64 {
+        x.tanh()
+    }
+}
+struct Tan;
+impl UnaryOpT for Tan {
+    const OP: UnaryOp = UnaryOp::Tan;
+    fn op_fn(x: f64) -> f64 {
+        x.tan()
+    }
+}
+struct Ceil;
+impl UnaryOpT for Ceil {
+    const OP: UnaryOp = UnaryOp::Ceil;
+    fn op_fn(x: f64) -> f64 {
+        x.ceil()
+    }
+}
+struct Floor;
+impl UnaryOpT for Floor {
+    const OP: UnaryOp = UnaryOp::Floor;
+    fn op_fn(x: f64) -> f64 {
+        x.floor()
+    }
+}
+struct Round;
+impl UnaryOpT for Round {
+    const OP: UnaryOp = UnaryOp::Round;
+    fn op_fn(x: f64) -> f64 {
+        x.round()
+    }
+}
+struct Sign;
+impl UnaryOpT for Sign {
+    const OP: UnaryOp = UnaryOp::Sign;
+    fn op_fn(x: f64) -> f64 {
+        x.signum()
+    }
+}
+struct Sqrt;
+impl UnaryOpT for Sqrt {
+    const OP: UnaryOp = UnaryOp::Sqrt;
+    fn op_fn(x: f64) -> f64 {
+        x.sqrt()
+    }
+}
+struct Sqr;
+impl UnaryOpT for Sqr {
+    const OP: UnaryOp = UnaryOp::Sqr;
+    fn op_fn(x: f64) -> f64 {
+        x.powi(2)
+    }
+}
+struct Log;
+impl UnaryOpT for Log {
+    const OP: UnaryOp = UnaryOp::Log;
+    fn op_fn(x: f64) -> f64 {
+        x.ln()
+    }
+}
+struct Exp;
+impl UnaryOpT for Exp {
+    const OP: UnaryOp = UnaryOp::Exp;
+    fn op_fn(x: f64) -> f64 {
+        x.exp()
+    }
+}
+struct Abs;
+impl UnaryOpT for Abs {
+    const OP: UnaryOp = UnaryOp::Abs;
+    fn op_fn(x: f64) -> f64 {
+        x.abs()
+    }
+}
+struct Erf;
+impl UnaryOpT for Erf {
+    const OP: UnaryOp = UnaryOp::Erf;
+    fn op_fn(x: f64) -> f64 {
+        candle_core::cpu::erf::erf(x)
+    }
+}
+
+impl UnaryOp {
+    pub(super) const fn op_fn(&self) -> fn(f64) -> f64 {
+        match self {
+            Self::Neg => Neg::op_fn,
+            Self::Sin => Sin::op_fn,
+            Self::Cos => Cos::op_fn,
+            Self::Tanh => Tanh::op_fn,
+            Self::Tan => Tan::op_fn,
+            Self::Ceil => Ceil::op_fn,
+            Self::Floor => Floor::op_fn,
+            Self::Round => Round::op_fn,
+            Self::Sign => Sign::op_fn,
+            Self::Sqrt => Sqrt::op_fn,
+            Self::Sqr => Sqr::op_fn,
+            Self::Log => Log::op_fn,
+            Self::Exp => Exp::op_fn,
+            Self::Abs => Abs::op_fn,
+            Self::Erf => Erf::op_fn,
+        }
+    }
+}
+
+impl Tensor {
+    pub(super) fn iter_unary_op(&self, op_fn: fn(f64) -> f64) -> Vec<f64> {
+        self.values()
+            .read()
+            .unwrap()
+            .iter()
+            .map(|x| op_fn(*x))
+            .collect()
+    }
+    pub(super) fn unary_op(&self, op_fn: fn(f64) -> f64) -> Self {
+        Self(Arc::new((
+            if self.grad_id().is_some() {
+                Some(GradId::new())
+            } else {
+                None
+            },
+            RwLock::new(self.iter_unary_op(op_fn)),
+            ChangeMarker::new(),
+        )))
+    }
+}
+
+impl Expression {
+    pub fn sin(&self) -> Self {
+        Expression::unary_op::<Sin>(&self)
+    }
+    pub fn cos(&self) -> Self {
+        Expression::unary_op::<Cos>(&self)
+    }
+    pub fn tanh(&self) -> Self {
+        Expression::unary_op::<Tanh>(&self)
+    }
+    pub fn tan(&self) -> Self {
+        Expression::unary_op::<Tan>(&self)
+    }
+    pub fn ceil(&self) -> Self {
+        Expression::unary_op::<Ceil>(&self)
+    }
+    pub fn floor(&self) -> Self {
+        Expression::unary_op::<Floor>(&self)
+    }
+    pub fn round(&self) -> Self {
+        Expression::unary_op::<Round>(&self)
+    }
+    pub fn sign(&self) -> Self {
+        Expression::unary_op::<Sign>(&self)
+    }
+    pub fn sqrt(&self) -> Self {
+        Expression::unary_op::<Sqrt>(&self)
+    }
+    pub fn sqr(&self) -> Self {
+        Expression::unary_op::<Sqr>(&self)
+    }
+    pub fn log(&self) -> Self {
+        Expression::unary_op::<Log>(&self)
+    }
+    pub fn exp(&self) -> Self {
+        Expression::unary_op::<Exp>(&self)
+    }
+    pub fn abs(&self) -> Self {
+        Expression::unary_op::<Abs>(&self)
+    }
+    pub fn erf(&self) -> Self {
+        Expression::unary_op::<Erf>(&self)
+    }
+    fn unary_op<T: UnaryOpT>(&self) -> Self {
+        match self {
+            Expression::Const(x) => Expression::Const(T::op_fn(*x)),
+            Expression::Parameter(tensor) => Expression::Operation(
+                tensor.unary_op(T::op_fn),
+                Arc::new(Op::Unary(Self::Parameter(tensor.clone()), T::OP)),
+            ),
+            Expression::Operation(tensor, op) => Expression::Operation(
+                tensor.unary_op(T::op_fn),
+                Arc::new(Op::Unary(
+                    Self::Operation(tensor.clone(), op.clone()),
+                    T::OP,
+                )),
+            ),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////   BinaryOp   ///////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BinaryOp {
     Add,
@@ -32,15 +284,6 @@ pub enum BinaryOp {
     Max,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum CmpOp {
-    Eq,
-    Ne,
-    Le,
-    Ge,
-    Lt,
-    Gt,
-}
 trait BinaryOpT {
     const OP: BinaryOp;
     fn op_fn(lhs: f64, rhs: f64) -> f64;
@@ -147,38 +390,27 @@ impl BinaryOpT for Max {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Op {
-    // Copy(Expression),
-    Powf(Expression, f64),
-    // (op1 cmp_op op2)? op3 : op4
-    Cond(Expression, CmpOp, Expression, Expression, Expression),
-    Cmp(Expression, CmpOp),
-    Unary(Expression, UnaryOp),
-    Binary(Expression, Expression, BinaryOp),
-}
-
 impl BinaryOp {
     pub(super) const fn op_fn(&self) -> fn(f64, f64) -> f64 {
         match self {
-            BinaryOp::Add => Add::op_fn,
-            BinaryOp::Sub => Sub::op_fn,
-            BinaryOp::Mul => Mul::op_fn,
-            BinaryOp::Div => Div::op_fn,
-            BinaryOp::Pow => Pow::op_fn,
-            BinaryOp::Min => Min::op_fn,
-            BinaryOp::Max => Max::op_fn,
+            Self::Add => Add::op_fn,
+            Self::Sub => Sub::op_fn,
+            Self::Mul => Mul::op_fn,
+            Self::Div => Div::op_fn,
+            Self::Pow => Pow::op_fn,
+            Self::Min => Min::op_fn,
+            Self::Max => Max::op_fn,
         }
     }
     pub(super) const fn op_fn_inverse(&self) -> fn(f64, f64) -> f64 {
         match self {
-            BinaryOp::Add => Add::op_fn_inverse,
-            BinaryOp::Sub => Sub::op_fn_inverse,
-            BinaryOp::Mul => Mul::op_fn_inverse,
-            BinaryOp::Div => Div::op_fn_inverse,
-            BinaryOp::Pow => Pow::op_fn_inverse,
-            BinaryOp::Min => Min::op_fn_inverse,
-            BinaryOp::Max => Max::op_fn_inverse,
+            Self::Add => Add::op_fn_inverse,
+            Self::Sub => Sub::op_fn_inverse,
+            Self::Mul => Mul::op_fn_inverse,
+            Self::Div => Div::op_fn_inverse,
+            Self::Pow => Pow::op_fn_inverse,
+            Self::Min => Min::op_fn_inverse,
+            Self::Max => Max::op_fn_inverse,
         }
     }
 }
