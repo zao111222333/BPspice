@@ -10,3 +10,10 @@ requires-python = ">=3.7"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[tool.maturin]
+include = [
+#   { path = "path/**/*", format = "sdist" },
+#   { path = "all", format = ["sdist", "wheel"] },
+#   { path = "for/wheel/**/*", format = "wheel" }
+]
