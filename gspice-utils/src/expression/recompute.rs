@@ -22,7 +22,7 @@ impl<'a> From<RecomputeScalarTensor<'a>> for ScalarTensor<'a> {
         match value {
             RecomputeScalarTensor::Scalar(f) => ScalarTensor::Scalar(f),
             RecomputeScalarTensor::TensorNoChange(tensor)
-            | RecomputeScalarTensor::TensorChanged(tensor) => ScalarTensor::Tensor(tensor),
+            | RecomputeScalarTensor::TensorChanged(tensor) => ScalarTensor::Tensor(tensor.values()),
         }
     }
 }
@@ -68,16 +68,7 @@ impl ChangeMarker {
     fn mark_searched_nochange(&self) {
         self.0.store(COUNTER.load(Relaxed) + 2, Relaxed);
     }
-    fn parameter_search_change(&self) -> bool {
-        let counter = COUNTER.load(Relaxed);
-        if self.0.load(Relaxed) == counter + 1 {
-            true
-        } else {
-            self.0.store(counter + 2, Relaxed);
-            false
-        }
-    }
-    fn op_state(&self) -> ChangeState {
+    fn change_state(&self) -> ChangeState {
         let counter = COUNTER.load(Relaxed);
         match counter + 2 - self.0.load(Relaxed) {
             1 => ChangeState::Changed,
@@ -146,17 +137,11 @@ impl Expression {
     pub(super) fn recompute<'a>(&'a self) -> RecomputeScalarTensor<'a> {
         match self {
             Expression::Const(f) => RecomputeScalarTensor::Scalar(f),
-            Expression::Parameter(tensor) => {
-                if tensor.change_marker().parameter_search_change() {
-                    RecomputeScalarTensor::TensorChanged(tensor)
-                } else {
-                    RecomputeScalarTensor::TensorNoChange(tensor)
-                }
-            }
-            Expression::Operation(tensor, op) => match tensor.change_marker().op_state() {
+            Expression::Tensor(tensor) => match tensor.change_marker().change_state() {
                 ChangeState::Changed => RecomputeScalarTensor::TensorChanged(tensor),
                 ChangeState::NoChange => RecomputeScalarTensor::TensorNoChange(tensor),
-                ChangeState::NeedSearch => match op.as_ref() {
+                ChangeState::NeedSearch => match tensor.op() {
+                    Op::Assgin => RecomputeScalarTensor::nochange(tensor),
                     Op::Powf(expression, _) => todo!(),
                     Op::Cond(expression, cmp_op, expression1, expression2, expression3) => {
                         todo!()

@@ -15,7 +15,7 @@ impl fmt::Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expression::Const(v) => write!(f, "Const({})", v),
-            Expression::Parameter(tensor) | Expression::Operation(tensor, _) => {
+            Expression::Tensor(tensor) => {
                 write!(f, "Tensor({})", tensor)
             }
         }
@@ -51,7 +51,7 @@ impl<'a> ScalarTensor<'a> {
     pub fn eq_vec(&self, values: &[f64]) -> bool {
         match self {
             ScalarTensor::Tensor(tensor) => {
-                let lhs_v = tensor.values().read().unwrap();
+                let lhs_v = tensor.read().unwrap();
                 lhs_v.len() == values.len()
                     && lhs_v
                         .deref()

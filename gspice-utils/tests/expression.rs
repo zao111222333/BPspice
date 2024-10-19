@@ -13,8 +13,8 @@ fn op() {
 fn binary_op() {
     let const1 = Expression::constant(3.0);
     let const2 = Expression::constant(-2.0);
-    let (param1, param1_tensor) = Expression::parameter(vec![1.0, 2.0, 3.0], true);
-    let (param2, param2_tensor) = Expression::parameter(vec![-1.0, -2.0, -3.0], true);
+    let (param1, param1_tensor) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let (param2, param2_tensor) = Expression::tensor(vec![-1.0, -2.0, -3.0], true);
 
     let const2_min_param2 = const2.min(&param2);
     let const2_max_param2 = const2.max(&param2);
@@ -139,7 +139,7 @@ fn unary_op() {
     let values1 = vec![1.0, 2.0, 3.0];
     let x1 = 3.0;
     let const1 = Expression::constant(x1);
-    let (param1, param1_tensor) = Expression::parameter(values1.clone(), true);
+    let (param1, param1_tensor) = Expression::tensor(values1.clone(), true);
 
     let param1_neg = param1.neg();
     let param1_sin = param1.sin();

@@ -4,6 +4,8 @@ use super::{ChangeMarker, Expression, GradId, Tensor};
 
 #[derive(Clone, Debug)]
 pub enum Op {
+    /// new assign
+    Assgin,
     // Copy(Expression),
     Powf(Expression, f64),
     // (op1 cmp_op op2)? op3 : op4
@@ -195,7 +197,7 @@ impl Tensor {
             .map(|x| op_fn(*x))
             .collect()
     }
-    pub(super) fn unary_op(&self, op_fn: fn(f64) -> f64) -> Self {
+    pub(super) fn unary_op(&self, op_fn: fn(f64) -> f64, op: Op) -> Self {
         Self(Arc::new((
             if self.grad_id().is_some() {
                 Some(GradId::new())
@@ -204,6 +206,7 @@ impl Tensor {
             },
             RwLock::new(self.iter_unary_op(op_fn)),
             ChangeMarker::new(),
+            op
         )))
     }
 }
@@ -254,16 +257,8 @@ impl Expression {
     fn unary_op<T: UnaryOpT>(&self) -> Self {
         match self {
             Expression::Const(x) => Expression::Const(T::op_fn(*x)),
-            Expression::Parameter(tensor) => Expression::Operation(
-                tensor.unary_op(T::op_fn),
-                Arc::new(Op::Unary(Self::Parameter(tensor.clone()), T::OP)),
-            ),
-            Expression::Operation(tensor, op) => Expression::Operation(
-                tensor.unary_op(T::op_fn),
-                Arc::new(Op::Unary(
-                    Self::Operation(tensor.clone(), op.clone()),
-                    T::OP,
-                )),
+            Expression::Tensor(tensor) => Expression::Tensor(
+                tensor.unary_op(T::op_fn, Op::Unary(Self::Tensor(tensor.clone()), T::OP)),
             ),
         }
     }
@@ -437,7 +432,7 @@ impl Tensor {
             .map(|v| op_fn(*v, rhs))
             .collect()
     }
-    pub(super) fn binary_op(&self, rhs: &Self, op_fn: fn(f64, f64) -> f64) -> Self {
+    pub(super) fn binary_op(&self, rhs: &Self, op_fn: fn(f64, f64) -> f64, op: Op) -> Self {
         Self(Arc::new((
             if self.grad_id().is_some() || rhs.grad_id().is_some() {
                 Some(GradId::new())
@@ -446,9 +441,10 @@ impl Tensor {
             },
             RwLock::new(self.iter_binary_op(rhs, op_fn)),
             ChangeMarker::new(),
+            op
         )))
     }
-    pub(super) fn broadcast_binary_op(&self, rhs: f64, op_fn: fn(f64, f64) -> f64) -> Self {
+    pub(super) fn broadcast_binary_op(&self, rhs: f64, op_fn: fn(f64, f64) -> f64, op: Op) -> Self {
         Self(Arc::new((
             if self.grad_id().is_some() {
                 Some(GradId::new())
@@ -457,6 +453,7 @@ impl Tensor {
             },
             RwLock::new(self.broadcast_iter_binary_op(rhs, op_fn)),
             ChangeMarker::new(),
+            op
         )))
     }
 }
@@ -474,76 +471,27 @@ impl Expression {
     fn binary_op<T: BinaryOpT>(&self, rhs: &Self) -> Self {
         match (self, rhs) {
             (Self::Const(v1), Self::Const(v2)) => Self::Const(T::op_fn(*v1, *v2)),
-            (Self::Const(v1), Self::Parameter(tensor2)) => Self::Operation(
-                tensor2.broadcast_binary_op(*v1, T::op_fn_inverse),
-                Arc::new(Op::Binary(
+            (Self::Const(v1), Self::Tensor(tensor2)) => Self::Tensor(
+                tensor2.broadcast_binary_op(*v1, T::op_fn_inverse, Op::Binary(
                     Self::Const(*v1),
-                    Self::Parameter(tensor2.clone()),
+                    Self::Tensor(tensor2.clone()),
                     T::OP,
                 )),
             ),
-            (Self::Parameter(tensor1), Self::Const(v2)) => Self::Operation(
-                tensor1.broadcast_binary_op(*v2, T::op_fn),
-                Arc::new(Op::Binary(
-                    Self::Parameter(tensor1.clone()),
+            (Self::Tensor(tensor1), Self::Const(v2)) => Self::Tensor(
+                tensor1.broadcast_binary_op(*v2, T::op_fn, Op::Binary(
+                    Self::Tensor(tensor1.clone()),
                     Self::Const(*v2),
                     T::OP,
                 )),
             ),
-            (Self::Const(v1), Self::Operation(tensor2, op2)) => Self::Operation(
-                tensor2.broadcast_binary_op(*v1, T::op_fn_inverse),
-                Arc::new(Op::Binary(
-                    Self::Const(*v1),
-                    Self::Operation(tensor2.clone(), op2.clone()),
+            (Expression::Tensor(tensor1), Expression::Tensor(tensor2)) => Self::Tensor(
+                tensor1.binary_op(tensor2, T::op_fn, Op::Binary(
+                    Self::Tensor(tensor1.clone()),
+                    Self::Tensor(tensor2.clone()),
                     T::OP,
                 )),
             ),
-            (Self::Operation(tensor1, op1), Self::Const(v2)) => Self::Operation(
-                tensor1.broadcast_binary_op(*v2, T::op_fn),
-                Arc::new(Op::Binary(
-                    Self::Operation(tensor1.clone(), op1.clone()),
-                    Self::Const(*v2),
-                    T::OP,
-                )),
-            ),
-            (Expression::Parameter(tensor1), Expression::Parameter(tensor2)) => Self::Operation(
-                tensor1.binary_op(tensor2, T::op_fn),
-                Arc::new(Op::Binary(
-                    Self::Parameter(tensor1.clone()),
-                    Self::Parameter(tensor2.clone()),
-                    T::OP,
-                )),
-            ),
-            (Expression::Parameter(tensor1), Expression::Operation(tensor2, op2)) => {
-                Self::Operation(
-                    tensor1.binary_op(tensor2, T::op_fn),
-                    Arc::new(Op::Binary(
-                        Self::Parameter(tensor1.clone()),
-                        Self::Operation(tensor2.clone(), op2.clone()),
-                        T::OP,
-                    )),
-                )
-            }
-            (Expression::Operation(tensor1, op1), Expression::Parameter(tensor2)) => {
-                Self::Operation(
-                    tensor1.binary_op(tensor2, T::op_fn),
-                    Arc::new(Op::Binary(
-                        Self::Operation(tensor1.clone(), op1.clone()),
-                        Self::Parameter(tensor2.clone()),
-                        T::OP,
-                    )),
-                )
-            }
-            (Expression::Operation(tensor1, op1), Expression::Operation(tensor2, op2)) => {
-                Self::Operation(
-                    tensor1.binary_op(tensor2, T::op_fn),
-                    Arc::new(Op::Binary(
-                        Self::Operation(tensor1.clone(), op1.clone()),
-                        Self::Operation(tensor2.clone(), op2.clone()),
-                        T::OP,
-                    )),
-                )
-            }
         }
     }
 }
