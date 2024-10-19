@@ -11,7 +11,7 @@ enum ChangeState {
     NoChange,
 }
 
-pub enum RecomputeScalarTensor<'a> {
+pub(super) enum RecomputeScalarTensor<'a> {
     Scalar(&'a f64),
     TensorNoChange(&'a Tensor),
     TensorChanged(&'a Tensor),
@@ -42,6 +42,11 @@ impl<'a> RecomputeScalarTensor<'a> {
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+pub fn before_update() {
+    // No need async, use Relaxed
+    COUNTER.fetch_add(2, Relaxed);
+}
+
 /// When ChangeMarker::COUNTER is 2n,
 ///
 /// 2n-1 , 2n : have not been searched
@@ -52,14 +57,10 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 ///
 /// update tensor makes its marker become 2n+1
 #[derive(Debug)]
-pub struct ChangeMarker(AtomicUsize);
+pub(crate) struct ChangeMarker(AtomicUsize);
 impl ChangeMarker {
-    pub fn recompute_done() {
-        // No need async, use Relaxed
-        COUNTER.fetch_add(2, Relaxed);
-    }
     pub(super) const fn new() -> Self {
-        Self(AtomicUsize::new(0))
+        Self(AtomicUsize::new(2))
     }
     pub(super) fn mark_searched_change(&self) {
         self.0.store(COUNTER.load(Relaxed) + 1, Relaxed);
@@ -87,7 +88,7 @@ impl ChangeMarker {
 }
 
 impl BinaryOp {
-    pub(super) fn recompute<'a>(
+    fn recompute<'a>(
         &self,
         lhs: &Expression,
         rhs: &Expression,
@@ -130,11 +131,7 @@ impl BinaryOp {
 }
 
 impl UnaryOp {
-    pub(super) fn recompute<'a>(
-        &self,
-        node: &Expression,
-        tensor: &'a Tensor,
-    ) -> RecomputeScalarTensor<'a> {
+    fn recompute<'a>(&self, node: &Expression, tensor: &'a Tensor) -> RecomputeScalarTensor<'a> {
         match node.recompute() {
             RecomputeScalarTensor::Scalar(_) => unreachable!(),
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
@@ -146,8 +143,7 @@ impl UnaryOp {
 }
 
 impl Expression {
-    /// return if changed inside
-    pub fn recompute<'a>(&'a self) -> RecomputeScalarTensor<'a> {
+    pub(super) fn recompute<'a>(&'a self) -> RecomputeScalarTensor<'a> {
         match self {
             Expression::Const(f) => RecomputeScalarTensor::Scalar(f),
             Expression::Parameter(tensor) => {
@@ -172,35 +168,4 @@ impl Expression {
             },
         }
     }
-}
-
-#[test]
-fn test_recompute() {
-    use std::ops::*;
-    let const1 = Expression::constant(1.0);
-    let const2 = Expression::constant(-1.0);
-    let (param1, param1_tensor) = Expression::parameter(vec![1.0, 2.0, 3.0], true);
-    let (param2, param2_tensor) = Expression::parameter(vec![-1.0, -2.0, -3.0], true);
-
-    let exp1 = param1.add(&param2);
-    // let exp1 = &param1 + &param2;
-    let exp2 = param1.add(&const1);
-    let exp3 = param1.sub(&const1);
-    let exp4 = const1.sub(&param1);
-    println!("param1 {}", param1);
-    println!("param2 {}", param2);
-    // println!("exp1 {:?}", exp1);
-    println!("exp1 {}", exp1);
-    // println!("exp2 {:?}", exp2);
-    println!("exp2 {}", exp2);
-    println!("exp3 {}", exp3);
-    println!("exp4 {}", exp4);
-    println!("const1 {}", const1);
-    param1_tensor.update(vec![0.0, 0.0, 0.0]);
-    println!("param1 {}", param1);
-    exp4.recompute();
-    exp1.recompute();
-    println!("exp4 {:?}", exp4);
-    println!("exp1 {:?}", exp1);
-    ChangeMarker::recompute_done();
 }

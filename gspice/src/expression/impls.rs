@@ -3,7 +3,7 @@ use std::ops::Deref;
 
 use ordered_float::OrderedFloat;
 
-use super::{Expression, Tensor};
+use super::{Expression, ScalarTensor, Tensor};
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,27 +22,37 @@ impl fmt::Display for Expression {
     }
 }
 
-impl PartialEq for Tensor {
-    fn eq(&self, other: &Self) -> bool {
-        let lhs_v = self.values().read().unwrap();
-        let rhs_v = other.values().read().unwrap();
-        lhs_v.deref().eq(rhs_v.deref())
-    }
-}
+// impl PartialEq for Tensor {
+//     fn eq(&self, other: &Self) -> bool {
+//         let lhs_v = self.values().read().unwrap();
+//         let rhs_v = other.values().read().unwrap();
+//         lhs_v.len() == rhs_v.len()
+//             && lhs_v
+//                 .deref()
+//                 .iter()
+//                 .zip(rhs_v.deref().iter())
+//                 .all(|(x1, x2)| OrderedFloat(*x1).eq(&OrderedFloat(*x2)))
+//     }
+// }
 
-#[cfg(test)]
-impl Expression {
-    pub(super) fn eq_vec(&self, values: &[f64]) -> bool {
+impl<'a> ScalarTensor<'a> {
+    pub fn eq_vec(&self, values: &[f64]) -> bool {
         match self {
-            Expression::Parameter(tensor) | Expression::Operation(tensor, _) => {
-                tensor.values().read().unwrap().eq(values)
+            ScalarTensor::Tensor(tensor) => {
+                let lhs_v = tensor.values().read().unwrap();
+                lhs_v.len() == values.len()
+                    && lhs_v
+                        .deref()
+                        .iter()
+                        .zip(values.iter())
+                        .all(|(x1, x2)| OrderedFloat(*x1).eq(&OrderedFloat(*x2)))
             }
             _ => false,
         }
     }
-    pub(super) fn eq_num(&self, value: f64) -> bool {
+    pub fn eq_num(&self, value: f64) -> bool {
         match self {
-            Expression::Const(f) => value.eq(f),
+            ScalarTensor::Scalar(f) => value.eq(*f),
             _ => false,
         }
     }

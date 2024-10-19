@@ -2,11 +2,12 @@ mod autograd;
 mod impls;
 mod op;
 mod recompute;
-mod test;
 
+pub use recompute::before_update;
+
+use op::Op;
 use autograd::GradId;
-pub use op::Op;
-pub use recompute::ChangeMarker;
+use recompute::ChangeMarker;
 
 use std::sync::{Arc, RwLock};
 
@@ -14,6 +15,7 @@ use std::sync::{Arc, RwLock};
 pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker)>);
 
 impl Tensor {
+    /// Need [`before_update`] before call this
     pub fn update(&self, values: Vec<f64>) {
         let mut write = self.values().write().unwrap();
         *write = values;
@@ -47,9 +49,13 @@ pub enum ScalarTensor<'a> {
 
 impl Expression {
     pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
-        match &self {
-            Self::Const(f) => ScalarTensor::Scalar(f),
-            Self::Parameter(tensor) | Self::Operation(tensor, _) => ScalarTensor::Tensor(tensor),
+        use recompute::RecomputeScalarTensor;
+        match self.recompute() {
+            RecomputeScalarTensor::Scalar(x) => ScalarTensor::Scalar(x),
+            RecomputeScalarTensor::TensorNoChange(tensor)
+            | RecomputeScalarTensor::TensorChanged(tensor) => {
+                ScalarTensor::Tensor(tensor)
+            }
         }
     }
     pub fn parameter(values: Vec<f64>, need_grad: bool) -> (Self, Tensor) {
