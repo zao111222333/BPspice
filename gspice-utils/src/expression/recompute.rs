@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use super::{
-    op::{BinaryOp, UnaryOp},
+    op::{BinaryOp, Powf, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
 
@@ -124,13 +124,26 @@ impl BinaryOp {
     }
 }
 
+impl Powf {
+    fn recompute<'a>(n: f64, node: &Expression, tensor: &'a Tensor) -> RecomputeScalarTensor<'a> {
+        match node.recompute() {
+            RecomputeScalarTensor::Scalar(_) => unreachable!(),
+            RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
+            RecomputeScalarTensor::TensorChanged(node_tensor) => RecomputeScalarTensor::change(
+                tensor,
+                node_tensor.broadcast_iter_binary_op(n, Powf::fn_op),
+            ),
+        }
+    }
+}
+
 impl UnaryOp {
     fn recompute<'a>(&self, node: &Expression, tensor: &'a Tensor) -> RecomputeScalarTensor<'a> {
         match node.recompute() {
             RecomputeScalarTensor::Scalar(_) => unreachable!(),
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
-            RecomputeScalarTensor::TensorChanged(node) => {
-                RecomputeScalarTensor::change(tensor, node.iter_unary_op(self.fn_op()))
+            RecomputeScalarTensor::TensorChanged(node_tensor) => {
+                RecomputeScalarTensor::change(tensor, node_tensor.iter_unary_op(self.fn_op()))
             }
         }
     }
@@ -145,7 +158,7 @@ impl Expression {
                 ChangeState::NoChange => RecomputeScalarTensor::TensorNoChange(tensor),
                 ChangeState::NeedSearch => match tensor.op() {
                     Op::Assgin => RecomputeScalarTensor::nochange(tensor),
-                    Op::Powf(expression, _) => todo!(),
+                    Op::Powf(node, n) => Powf::recompute(*n, node, tensor),
                     Op::Cond(cond, when_true, when_false) => {
                         todo!()
                     }

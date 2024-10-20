@@ -21,9 +21,36 @@ pub enum Op {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////   Powf   ///////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
+pub(super) struct Powf;
+impl Powf {
+    pub(super) fn fn_op(x: f64, n: f64) -> f64 {
+        x.powf(n)
+    }
+    pub(super) fn fn_backward(x: &f64, n: f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+        *sum_grad += grad * n * x.powf(n - 1.0);
+    }
+}
+impl Expression {
+    #[inline]
+    pub fn powf(&self, n: f64) -> Self {
+        match self {
+            Self::Const(x) => Self::Const(Powf::fn_op(*x, n)),
+            Self::Tensor(tensor) => Self::Tensor(tensor.broadcast_binary_op(
+                n,
+                Powf::fn_op,
+                Op::Powf(Self::Tensor(tensor.clone()), n),
+            )),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   UnaryOp   ////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum UnaryOp {
     Neg,
     Sin,
@@ -36,6 +63,7 @@ pub enum UnaryOp {
     Sign,
     Sqrt,
     Sqr,
+    Cubic,
     Log,
     Exp,
     Abs,
@@ -194,13 +222,26 @@ impl UnaryOpT for Sqr {
     const OP: UnaryOp = UnaryOp::Sqr;
     #[inline]
     fn fn_op(x: f64) -> f64 {
-        x.powi(2)
+        x * x
     }
     #[inline]
     fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * 2.0 * x;
     }
 }
+struct Cubic;
+impl UnaryOpT for Cubic {
+    const OP: UnaryOp = UnaryOp::Cubic;
+    #[inline]
+    fn fn_op(x: f64) -> f64 {
+        x * x * x
+    }
+    #[inline]
+    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+        *sum_grad += grad * 3.0 * x * x;
+    }
+}
+
 struct Log;
 impl UnaryOpT for Log {
     const OP: UnaryOp = UnaryOp::Log;
@@ -270,6 +311,7 @@ impl UnaryOp {
             Self::Sign => Sign::fn_op,
             Self::Sqrt => Sqrt::fn_op,
             Self::Sqr => Sqr::fn_op,
+            Self::Cubic => Cubic::fn_op,
             Self::Log => Log::fn_op,
             Self::Exp => Exp::fn_op,
             Self::Abs => Abs::fn_op,
@@ -290,6 +332,7 @@ impl UnaryOp {
             Self::Sign => Sign::fn_backward,
             Self::Sqrt => Sqrt::fn_backward,
             Self::Sqr => Sqr::fn_backward,
+            Self::Cubic => Cubic::fn_backward,
             Self::Log => Log::fn_backward,
             Self::Exp => Exp::fn_backward,
             Self::Abs => Abs::fn_backward,
@@ -299,6 +342,7 @@ impl UnaryOp {
 }
 
 impl Tensor {
+    #[inline]
     pub(super) fn iter_unary_op(&self, fn_op: fn(f64) -> f64) -> Vec<f64> {
         self.values()
             .read()
@@ -307,6 +351,7 @@ impl Tensor {
             .map(|x| fn_op(*x))
             .collect()
     }
+    #[inline]
     pub(super) fn unary_op(&self, fn_op: fn(f64) -> f64, op: Op) -> Self {
         Self(Arc::new((
             if self.grad_id().is_some() {
@@ -361,6 +406,10 @@ impl Expression {
     #[inline]
     pub fn sqr(&self) -> Self {
         Expression::unary_op::<Sqr>(&self)
+    }
+    #[inline]
+    pub fn cubic(&self) -> Self {
+        Expression::unary_op::<Cubic>(&self)
     }
     #[inline]
     pub fn log(&self) -> Self {

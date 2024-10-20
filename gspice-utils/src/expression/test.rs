@@ -10,6 +10,9 @@ use super::ScalarTensor;
 
 macro_rules! assert_eq_vec {
     ($lhs:expr, $rhs:expr) => {
+        assert_eq_vec!($lhs, $rhs, 0.0);
+    };
+    ($lhs:expr, $rhs:expr, $tolerance:expr) => {
         let lhs = $lhs;
         let rhs = $rhs;
         assert!(
@@ -17,7 +20,7 @@ macro_rules! assert_eq_vec {
                 && lhs
                     .iter()
                     .zip(rhs.iter())
-                    .all(|(x1, x2)| OrderedFloat(*x1).eq(&OrderedFloat(*x2))),
+                    .all(|(x1, x2)| OrderedFloat(f64::abs(x1-x2)).le(&OrderedFloat($tolerance))),
             "left:  {lhs:?}\nright: {rhs:?}"
         )
     };
@@ -37,24 +40,51 @@ macro_rules! assert_grad {
 
 macro_rules! assert_candle_scalar {
     ($got:expr, $want:expr) => {
-        assert_eq!(OrderedFloat($want.to_vec0::<f64>().unwrap()), OrderedFloat($got.value().to_scalar().unwrap()));
+        assert_eq!(
+            OrderedFloat($want.to_vec0::<f64>().unwrap()),
+            OrderedFloat($got.value().to_scalar().unwrap())
+        );
     };
 }
 
 macro_rules! assert_candle_tensor {
     ($got:expr, $want:expr) => {
-        assert_eq_vec!($want.to_vec1::<f64>().unwrap(), $got.value().to_tensor().unwrap());
+        assert_eq_vec!(
+            $want.to_vec1::<f64>().unwrap(),
+            $got.value().to_tensor().unwrap()
+        );
     };
     ($got:expr, $want:expr, ($got_tensor1:expr, $want_tensor1:expr)) => {
         assert_candle_tensor!($got, $want);
         let (grads, grads_candle) = ($got.backward(), $want.backward().unwrap());
-        assert_eq_vec!(&grads.get($got_tensor1).unwrap(), &grads_candle.get($want_tensor1).unwrap().to_vec1::<f64>().unwrap());    
+        assert_eq_vec!(
+            &grads.get($got_tensor1).unwrap(),
+            &grads_candle
+                .get($want_tensor1)
+                .unwrap()
+                .to_vec1::<f64>()
+                .unwrap()
+        );
     };
     ($got:expr, $want:expr, ($got_tensor1:expr, $want_tensor1:expr), ($got_tensor2:expr, $want_tensor2:expr)) => {
         assert_candle_tensor!($got, $want);
         let (grads, grads_candle) = ($got.backward(), $want.backward().unwrap());
-        assert_eq_vec!(&grads.get($got_tensor1).unwrap(), &grads_candle.get($want_tensor1).unwrap().to_vec1::<f64>().unwrap());    
-        assert_eq_vec!(&grads.get($got_tensor2).unwrap(), &grads_candle.get($want_tensor2).unwrap().to_vec1::<f64>().unwrap());    
+        assert_eq_vec!(
+            &grads.get($got_tensor1).unwrap(),
+            &grads_candle
+                .get($want_tensor1)
+                .unwrap()
+                .to_vec1::<f64>()
+                .unwrap()
+        );
+        assert_eq_vec!(
+            &grads.get($got_tensor2).unwrap(),
+            &grads_candle
+                .get($want_tensor2)
+                .unwrap()
+                .to_vec1::<f64>()
+                .unwrap()
+        );
     };
 }
 
@@ -93,7 +123,7 @@ fn gradient_decent() {
     let step = 0.01;
     let (x, x_ref) = Expression::uniform(n, -10.0, 10.0, true);
     let (y, y_ref) = Expression::uniform(n, -10.0, 10.0, true);
-    let f = &x.mul(&x) + &y.mul(&y);
+    let f = &x.sqr() + &y.sqr();
     let mut loss = f64::MAX;
     for i in 0..iter {
         if i % 200 == 0 {
@@ -214,6 +244,33 @@ fn backward_pow() {
     let df_db = grads.get(&b_ref);
     assert_grad!(df_da, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|b_x*a_x.powf(b_x-1.0)).collect());
     assert_grad!(df_db, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|a_x.powf(*b_x)*a_x.ln()).collect());
+}
+
+#[test]
+#[serial]
+#[rustfmt::skip]
+fn backward_powf() {
+    let a_vec = vec![1.5, 2.0, 3.0];
+    let (a, a_ref) = Expression::tensor(a_vec.clone(), true);
+    
+    let f1 = a.powf(2.0);
+    let f2 = a.powf(0.5);
+    let grads1 = f1.backward();
+    let grads2 = f2.backward();
+    let df1_da = grads1.get(&a_ref);
+    let df2_da = grads2.get(&a_ref);
+
+    let verify_f1 = a.sqr();
+    let verify_f2 = a.sqrt();
+    let verify_grads1 = verify_f1.backward();
+    let verify_grads2 = verify_f2.backward();
+    let verify_df1_da = verify_grads1.get(&a_ref);
+    let verify_df2_da = verify_grads2.get(&a_ref);
+
+    assert_eq_vec!(f1.value().to_tensor().unwrap(), verify_f1.value().to_tensor().unwrap());
+    assert_eq_vec!(f2.value().to_tensor().unwrap(), verify_f2.value().to_tensor().unwrap());
+    assert_eq_vec!(&df1_da.unwrap(), &verify_df1_da.unwrap());
+    assert_eq_vec!(&df2_da.unwrap(), &verify_df2_da.unwrap(), 1e-10);
 }
 
 #[test]
