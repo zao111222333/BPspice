@@ -18,6 +18,22 @@ impl fmt::Display for Expression {
     }
 }
 
+impl<'a> ScalarTensor<'a> {
+    pub fn to_scalar(&self) -> Option<f64> {
+        if let ScalarTensor::Scalar(f) = self {
+            Some(**f)
+        } else {
+            None
+        }
+    }
+    pub fn to_tensor(&self) -> Option<Vec<f64>> {
+        if let ScalarTensor::Tensor(tensor) = self {
+            Some(tensor.read().unwrap().clone())
+        } else {
+            None
+        }
+    }
+}
 impl<'a> fmt::Display for ScalarTensor<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

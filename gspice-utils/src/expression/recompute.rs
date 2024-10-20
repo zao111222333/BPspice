@@ -149,7 +149,6 @@ impl Expression {
                     Op::Cond(cond, when_true, when_false) => {
                         todo!()
                     }
-                    Op::Cmp(expression, cmp_op) => todo!(),
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
                 },

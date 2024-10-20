@@ -1,17 +1,24 @@
 use std::{
-    collections::{BTreeMap, HashMap},
-    ops::{Deref, DerefMut},
-    sync::atomic::{AtomicUsize, Ordering::Relaxed},
+    collections::{BTreeMap, HashMap}, ops::{Deref, DerefMut}, sync::atomic::{AtomicUsize, Ordering::Relaxed}
 };
 
-use super::{op::BinaryOp, Expression, Op, Tensor, TensorRef};
-use core::cmp::Ordering;
+use super::{
+    op::{BinaryOp, UnaryOp},
+    Expression, Op, Tensor, TensorRef,
+};
+use core::{cmp::Ordering, fmt};
 
 #[derive(Debug)]
 pub struct Grad(Vec<f64>);
 impl Grad {
     pub fn inner(self) -> Vec<f64> {
         self.0
+    }
+}
+
+impl fmt::Display for Grad {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Grad({:?})", self.0)
     }
 }
 
@@ -67,9 +74,13 @@ impl Expression {
                         match tensor.op() {
                             Op::Assgin => (),
                             Op::Powf(expr, _) => walk(expr, already_seen),
-                            Op::Cond(cond, when_true, when_false) => todo!(),
-                            Op::Cmp(expr, cmp_op) => todo!(),
-                            Op::Unary(expr, unary_op) => walk(expr, already_seen),
+                            Op::Cond(_, when_true, when_false) => {
+                                // FIXME:
+                                // walk(cond, already_seen);
+                                walk(when_true, already_seen);
+                                walk(when_false, already_seen);
+                            }
+                            Op::Unary(expr, _) => walk(expr, already_seen),
                             Op::Binary(expr1, expr2, _) => {
                                 walk(expr1, already_seen);
                                 walk(expr2, already_seen);
@@ -102,8 +113,9 @@ impl Expression {
                     Op::Assgin => unreachable!(),
                     Op::Powf(expression, _) => todo!(),
                     Op::Cond(cond, when_true, when_false) => todo!(),
-                    Op::Cmp(expression, cmp_op) => todo!(),
-                    Op::Unary(node, unary_op) => todo!(),
+                    Op::Unary(node, unary_op) => {
+                        unary_op.backward(tensor, node, &mut grads, grad);
+                    }
                     Op::Binary(lhs, rhs, binary_op) => {
                         binary_op.backward(tensor, lhs, rhs, &mut grads, grad);
                     }
@@ -158,6 +170,27 @@ impl GradStore {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(Grad(tensor.zeros_like())),
         })
+    }
+}
+
+impl UnaryOp {
+    fn backward(&self, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
+        let fn_backward = self.fn_backward();
+        match node {
+            Expression::Const(_) => unreachable!(),
+            Expression::Tensor(inner_tensor) => {
+                if let Some(sum_grad) = grads.or_insert(tensor) {
+                    for (grad, res, x, grad_x) in itertools::izip!(
+                        sum_grad.iter_mut(),
+                        tensor.values().read().unwrap().iter(),
+                        inner_tensor.values().read().unwrap().iter(),
+                        grad.iter(),
+                    ) {
+                        fn_backward(x, res, grad_x, grad);
+                    }
+                }
+            }
+        }
     }
 }
 
