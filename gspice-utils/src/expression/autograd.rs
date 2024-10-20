@@ -179,7 +179,7 @@ impl UnaryOp {
         match node {
             Expression::Const(_) => unreachable!(),
             Expression::Tensor(inner_tensor) => {
-                if let Some(sum_grad) = grads.or_insert(tensor) {
+                if let Some(sum_grad) = grads.or_insert(inner_tensor) {
                     for (grad, res, x, grad_x) in itertools::izip!(
                         sum_grad.iter_mut(),
                         tensor.values().read().unwrap().iter(),
@@ -226,7 +226,7 @@ impl BinaryOp {
                         grad.iter(),
                         lhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_lhs(lhs_x, rhs_x, grad_x, res, lhs_grad);
+                        fn_backward_lhs(lhs_x, rhs_x, res, grad_x, lhs_grad);
                     }
                 }
             }

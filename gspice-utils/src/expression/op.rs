@@ -128,11 +128,11 @@ impl UnaryOpT for Ceil {
     fn fn_op(x: f64) -> f64 {
         x.ceil()
     }
-    /// FIXME: Error::BackwardNotSupported
+    // FIXME: No gradient for compare
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Ceil");
-        *sum_grad += grad;
+        // *sum_grad += grad;
     }
 }
 struct Floor;
@@ -143,9 +143,9 @@ impl UnaryOpT for Floor {
         x.floor()
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Floor");
-        *sum_grad += grad;
+        // *sum_grad += grad;
     }
 }
 struct Round;
@@ -156,9 +156,9 @@ impl UnaryOpT for Round {
         x.round()
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Round");
-        *sum_grad += grad;
+        // *sum_grad += grad;
     }
 }
 struct Sign;
@@ -169,12 +169,12 @@ impl UnaryOpT for Sign {
         x.signum()
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Sign");
-        let epsilon = 1e-10;
-        if (x.abs() - epsilon).is_sign_negative() {
-            *sum_grad += grad;
-        }
+        // let epsilon = 1e-10;
+        // if (x.abs() - epsilon).is_sign_negative() {
+        //     *sum_grad += grad;
+        // }
     }
 }
 struct Sqrt;

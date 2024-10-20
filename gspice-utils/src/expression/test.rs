@@ -62,7 +62,7 @@ macro_rules! assert_tensor {
     ($got:expr, $want:expr) => {
         let got = $got;
         let want: Vec<f64> = $want;
-        match got {
+        match got.value() {
             ScalarTensor::Tensor(tensor) => {
                 assert_eq_vec!(&tensor.read().unwrap(), &want);
             }
@@ -75,7 +75,7 @@ macro_rules! assert_scalar {
     ($got:expr, $want:expr) => {
         let got = $got;
         let want: f64 = $want;
-        match got {
+        match got.value() {
             ScalarTensor::Scalar(f) => assert!(
                 OrderedFloat(*f).eq(&OrderedFloat(want)),
                 "left:  {f:?}\nright: {want:?}"
@@ -235,7 +235,53 @@ fn backward_min_max() {
     assert_grad!(dmax_db, vec![1.0, 0.5, 0.0]);
     assert_grad!(dmin_db, vec![0.0, 0.5, 1.0]);
 }
+#[test]
+#[serial]
+#[rustfmt::skip]
+fn cmp_op() {
+    let const1 = Expression::constant(3.0);
+    let const2 = Expression::constant(-2.0);
+    let (tensor1, _) = Expression::tensor(vec![1.0, 4.0, 3.0], true);
+    let (tensor2, _) = Expression::tensor(vec![-1.0, 5.0, 3.0], true);
+    let const1_eq_const2 = const1.eq(&const2);
+    let const1_ne_const2 = const1.ne(&const2);
+    let const1_le_const2 = const1.le(&const2);
+    let const1_ge_const2 = const1.ge(&const2);
+    let const1_lt_const2 = const1.lt(&const2);
+    let const1_gt_const2 = const1.gt(&const2);
+    assert_scalar!(&const1_eq_const2, 0.0);
+    assert_scalar!(&const1_ne_const2, 1.0);
+    assert_scalar!(&const1_le_const2, 0.0);
+    assert_scalar!(&const1_ge_const2, 1.0);
+    assert_scalar!(&const1_lt_const2, 0.0);
+    assert_scalar!(&const1_gt_const2, 1.0);
 
+    let const1_eq_tensor2 = const1.eq(&tensor2);
+    let const1_ne_tensor2 = const1.ne(&tensor2);
+    let const1_le_tensor2 = const1.le(&tensor2);
+    let const1_ge_tensor2 = const1.ge(&tensor2);
+    let const1_lt_tensor2 = const1.lt(&tensor2);
+    let const1_gt_tensor2 = const1.gt(&tensor2);
+    assert_tensor!(&const1_eq_tensor2, vec![0.0, 0.0, 1.0]);
+    assert_tensor!(&const1_ne_tensor2, vec![1.0, 1.0, 0.0]);
+    assert_tensor!(&const1_le_tensor2, vec![0.0, 1.0, 1.0]);
+    assert_tensor!(&const1_ge_tensor2, vec![1.0, 0.0, 1.0]);
+    assert_tensor!(&const1_lt_tensor2, vec![0.0, 1.0, 0.0]);
+    assert_tensor!(&const1_gt_tensor2, vec![1.0, 0.0, 0.0]);
+
+    let tensor1_eq_tensor2 = tensor1.eq(&tensor2);
+    let tensor1_ne_tensor2 = tensor1.ne(&tensor2);
+    let tensor1_le_tensor2 = tensor1.le(&tensor2);
+    let tensor1_ge_tensor2 = tensor1.ge(&tensor2);
+    let tensor1_lt_tensor2 = tensor1.lt(&tensor2);
+    let tensor1_gt_tensor2 = tensor1.gt(&tensor2);
+    assert_tensor!(&tensor1_eq_tensor2, vec![0.0, 0.0, 1.0]);
+    assert_tensor!(&tensor1_ne_tensor2, vec![1.0, 1.0, 0.0]);
+    assert_tensor!(&tensor1_le_tensor2, vec![0.0, 1.0, 1.0]);
+    assert_tensor!(&tensor1_ge_tensor2, vec![1.0, 0.0, 1.0]);
+    assert_tensor!(&tensor1_lt_tensor2, vec![0.0, 1.0, 0.0]);
+    assert_tensor!(&tensor1_gt_tensor2, vec![1.0, 0.0, 0.0]);
+}
 #[test]
 #[serial]
 #[rustfmt::skip]
@@ -247,53 +293,52 @@ fn binary_op() {
     
     let const2_min_tensor2 = const2.min(&tensor2);
     let const2_max_tensor2 = const2.max(&tensor2);
-    assert_tensor!(const2_max_tensor2.value(), vec![-1.0, -2.0, -2.0]);
-    assert_tensor!(const2_min_tensor2.value(), vec![-2.0, -2.0, -3.0]);
+    assert_tensor!(&const2_max_tensor2, vec![-1.0, -2.0, -2.0]);
+    assert_tensor!(&const2_min_tensor2, vec![-2.0, -2.0, -3.0]);
 
     let const1_add_const2 = const1.add(&const2);
     let const1_sub_const2 = const1.sub(&const2);
     let const1_mul_const2 = const1.mul(&const2);
     let const1_div_const2 = const1.div(&const2);
     let const2_pow_const1 = const2.pow(&const1);
-    assert_scalar!(const1_add_const2.value(),1.0);
-    assert_scalar!(const1_sub_const2.value(),5.0);
-    assert_scalar!(const1_mul_const2.value(),-6.0);
-    assert_scalar!(const1_div_const2.value(),-1.5);
-    assert_scalar!(const2_pow_const1.value(),-8.0);
+    assert_scalar!(&const1_add_const2,1.0);
+    assert_scalar!(&const1_sub_const2,5.0);
+    assert_scalar!(&const1_mul_const2,-6.0);
+    assert_scalar!(&const1_div_const2,-1.5);
+    assert_scalar!(&const2_pow_const1,-8.0);
 
     let const1_add_tensor1 = const1.add(&tensor1);
     let const1_sub_tensor1 = const1.sub(&tensor1);
     let const1_mul_tensor1 = const1.mul(&tensor1);
     let const1_div_tensor1 = const1.div(&tensor1);
     let const1_pow_tensor1 = const1.pow(&tensor1);
-    assert_tensor!(const1_add_tensor1.value(), vec![4.0, 5.0, 6.0]);
-    assert_tensor!(const1_sub_tensor1.value(), vec![2.0, 1.0, 0.0]);
-    assert_tensor!(const1_mul_tensor1.value(), vec![3.0, 6.0, 9.0]);
-    assert_tensor!(const1_div_tensor1.value(), vec![3.0, 1.5, 1.0]);
-    assert_tensor!(const1_pow_tensor1.value(), vec![3.0, 9.0, 27.0]);
+    assert_tensor!(&const1_add_tensor1, vec![4.0, 5.0, 6.0]);
+    assert_tensor!(&const1_sub_tensor1, vec![2.0, 1.0, 0.0]);
+    assert_tensor!(&const1_mul_tensor1, vec![3.0, 6.0, 9.0]);
+    assert_tensor!(&const1_div_tensor1, vec![3.0, 1.5, 1.0]);
+    assert_tensor!(&const1_pow_tensor1, vec![3.0, 9.0, 27.0]);
 
     let tensor1_add_const1 = tensor1.add(&const1);
-    println!("{tensor1_add_const1:?}");
     let tensor1_sub_const1 = tensor1.sub(&const1);
     let tensor1_mul_const1 = tensor1.mul(&const1);
     let tensor1_div_const1 = tensor1.div(&const1);
     let tensor1_pow_const1 = tensor1.pow(&const1);
-    assert_tensor!(tensor1_add_const1.value(), vec![4.0, 5.0, 6.0]);
-    assert_tensor!(tensor1_sub_const1.value(), vec![-2.0, -1.0, -0.0]);
-    assert_tensor!(tensor1_mul_const1.value(), vec![3.0, 6.0, 9.0]);
-    assert_tensor!(tensor1_div_const1.value(), vec![1.0 / 3.0, 2.0 / 3.0, 1.0]);
-    assert_tensor!(tensor1_pow_const1.value(), vec![1.0, 8.0, 27.0]);
+    assert_tensor!(&tensor1_add_const1, vec![4.0, 5.0, 6.0]);
+    assert_tensor!(&tensor1_sub_const1, vec![-2.0, -1.0, -0.0]);
+    assert_tensor!(&tensor1_mul_const1, vec![3.0, 6.0, 9.0]);
+    assert_tensor!(&tensor1_div_const1, vec![1.0 / 3.0, 2.0 / 3.0, 1.0]);
+    assert_tensor!(&tensor1_pow_const1, vec![1.0, 8.0, 27.0]);
 
     let tensor1_add_tensor2 = tensor1.add(&tensor2);
     let tensor1_sub_tensor2 = tensor1.sub(&tensor2);
     let tensor1_mul_tensor2 = tensor1.mul(&tensor2);
     let tensor1_div_tensor2 = tensor1.div(&tensor2);
     let tensor2_pow_tensor1 = tensor2.pow(&tensor1);
-    assert_tensor!(tensor1_add_tensor2.value(), vec![0.0, 0.0, 0.0]);
-    assert_tensor!(tensor1_sub_tensor2.value(), vec![2.0, 4.0, 6.0]);
-    assert_tensor!(tensor1_mul_tensor2.value(), vec![-1.0, -4.0, -9.0]);
-    assert_tensor!(tensor1_div_tensor2.value(), vec![-1.0, -1.0, -1.0]);
-    assert_tensor!(tensor2_pow_tensor1.value(), vec![-1.0, 4.0, -27.0]);
+    assert_tensor!(&tensor1_add_tensor2, vec![0.0, 0.0, 0.0]);
+    assert_tensor!(&tensor1_sub_tensor2, vec![2.0, 4.0, 6.0]);
+    assert_tensor!(&tensor1_mul_tensor2, vec![-1.0, -4.0, -9.0]);
+    assert_tensor!(&tensor1_div_tensor2, vec![-1.0, -1.0, -1.0]);
+    assert_tensor!(&tensor2_pow_tensor1, vec![-1.0, 4.0, -27.0]);
 
     // Compare to candle's result
     let candle_var_const1 = candle_core::Var::new(3.0, &candle_core::Device::Cpu).unwrap();
@@ -310,11 +355,11 @@ fn binary_op() {
     let candle_const1_mul_const2 = candle_const1.mul(candle_const2).unwrap();
     let candle_const1_div_const2 = candle_const1.div(candle_const2).unwrap();
     // let candle_const1_pow_const2 = candle_const1.pow(candle_const2).unwrap();
-    assert_candle_scalar!(const1_add_const2, candle_const1_add_const2);
-    assert_candle_scalar!(const1_sub_const2, candle_const1_sub_const2);
-    assert_candle_scalar!(const1_mul_const2, candle_const1_mul_const2);
-    assert_candle_scalar!(const1_div_const2, candle_const1_div_const2);
-    // assert_candle_scalar!(const2_pow_const1, candle_const2_pow_const1);
+    assert_candle_scalar!(&const1_add_const2, candle_const1_add_const2);
+    assert_candle_scalar!(&const1_sub_const2, candle_const1_sub_const2);
+    assert_candle_scalar!(&const1_mul_const2, candle_const1_mul_const2);
+    assert_candle_scalar!(&const1_div_const2, candle_const1_div_const2);
+    // assert_candle_scalar!(&const2_pow_const1, candle_const2_pow_const1);
 
     let candle_const1_add_tensor1 = candle_const1.broadcast_add(candle_tensor1).unwrap();
     let candle_const1_sub_tensor1 = candle_const1.broadcast_sub(candle_tensor1).unwrap();
@@ -353,64 +398,64 @@ fn binary_op() {
     tensor1_ref.assgin(vec![-3.0, 6.0]);
     tensor2_ref.assgin(vec![3.0, -4.0]);
 
-    assert_tensor!(const2_max_tensor2.value(), vec![3.0, -2.0]);
-    assert_tensor!(const2_min_tensor2.value(), vec![-2.0, -4.0]);
+    assert_tensor!(&const2_max_tensor2, vec![3.0, -2.0]);
+    assert_tensor!(&const2_min_tensor2, vec![-2.0, -4.0]);
 
-    assert_scalar!(const1_add_const2.value(),1.0);
-    assert_scalar!(const1_sub_const2.value(),5.0);
-    assert_scalar!(const1_mul_const2.value(),-6.0);
-    assert_scalar!(const1_div_const2.value(),-1.5);
-    assert_scalar!(const2_pow_const1.value(),-8.0);
+    assert_scalar!(&const1_add_const2,1.0);
+    assert_scalar!(&const1_sub_const2,5.0);
+    assert_scalar!(&const1_mul_const2,-6.0);
+    assert_scalar!(&const1_div_const2,-1.5);
+    assert_scalar!(&const2_pow_const1,-8.0);
 
-    assert_tensor!(const1_add_tensor1.value(), vec![0.0, 9.0]);
-    assert_tensor!(const1_sub_tensor1.value(), vec![6.0, -3.0]);
-    assert_tensor!(const1_mul_tensor1.value(), vec![-9.0, 18.0]);
-    assert_tensor!(const1_div_tensor1.value(), vec![-1.0, 0.5]);
-    assert_tensor!(const1_pow_tensor1.value(), vec![3.0_f64.powf(-3.0), 3.0_f64.powf(6.0)]);
+    assert_tensor!(&const1_add_tensor1, vec![0.0, 9.0]);
+    assert_tensor!(&const1_sub_tensor1, vec![6.0, -3.0]);
+    assert_tensor!(&const1_mul_tensor1, vec![-9.0, 18.0]);
+    assert_tensor!(&const1_div_tensor1, vec![-1.0, 0.5]);
+    assert_tensor!(&const1_pow_tensor1, vec![3.0_f64.powf(-3.0), 3.0_f64.powf(6.0)]);
 
-    assert_tensor!(tensor1_add_const1.value(), vec![0.0, 9.0]);
-    assert_tensor!(tensor1_sub_const1.value(), vec![-6.0, 3.0]);
-    assert_tensor!(tensor1_mul_const1.value(), vec![-9.0, 18.0]);
-    assert_tensor!(tensor1_div_const1.value(), vec![-1.0, 2.0]);
-    assert_tensor!(tensor1_pow_const1.value(), vec![(-3.0_f64).powf(3.0), 6.0_f64.powf(3.0)]);
+    assert_tensor!(&tensor1_add_const1, vec![0.0, 9.0]);
+    assert_tensor!(&tensor1_sub_const1, vec![-6.0, 3.0]);
+    assert_tensor!(&tensor1_mul_const1, vec![-9.0, 18.0]);
+    assert_tensor!(&tensor1_div_const1, vec![-1.0, 2.0]);
+    assert_tensor!(&tensor1_pow_const1, vec![(-3.0_f64).powf(3.0), 6.0_f64.powf(3.0)]);
 
-    assert_tensor!(tensor1_add_tensor2.value(), vec![0.0, 2.0]);
-    assert_tensor!(tensor1_sub_tensor2.value(), vec![-6.0, 10.0]);
-    assert_tensor!(tensor1_mul_tensor2.value(), vec![-9.0, -24.0]);
-    assert_tensor!(tensor1_div_tensor2.value(), vec![-1.0, -1.5]);
-    assert_tensor!(tensor2_pow_tensor1.value(), vec![3.0_f64.powf(-3.0), (-4.0_f64).powf(6.0)]);
+    assert_tensor!(&tensor1_add_tensor2, vec![0.0, 2.0]);
+    assert_tensor!(&tensor1_sub_tensor2, vec![-6.0, 10.0]);
+    assert_tensor!(&tensor1_mul_tensor2, vec![-9.0, -24.0]);
+    assert_tensor!(&tensor1_div_tensor2, vec![-1.0, -1.5]);
+    assert_tensor!(&tensor2_pow_tensor1, vec![3.0_f64.powf(-3.0), (-4.0_f64).powf(6.0)]);
 
     // Update 2
     before_update();
     tensor1_ref.assgin(vec![6.0]);
     tensor2_ref.assgin(vec![-4.0]);
 
-    assert_tensor!(const2_max_tensor2.value(), vec![-2.0]);
-    assert_tensor!(const2_min_tensor2.value(), vec![-4.0]);
+    assert_tensor!(&const2_max_tensor2, vec![-2.0]);
+    assert_tensor!(&const2_min_tensor2, vec![-4.0]);
 
-    assert_scalar!(const1_add_const2.value(), 1.0);
-    assert_scalar!(const1_sub_const2.value(), 5.0);
-    assert_scalar!(const1_mul_const2.value(), -6.0);
-    assert_scalar!(const1_div_const2.value(), -1.5);
-    assert_scalar!(const2_pow_const1.value(), -8.0);
+    assert_scalar!(&const1_add_const2, 1.0);
+    assert_scalar!(&const1_sub_const2, 5.0);
+    assert_scalar!(&const1_mul_const2, -6.0);
+    assert_scalar!(&const1_div_const2, -1.5);
+    assert_scalar!(&const2_pow_const1, -8.0);
 
-    assert_tensor!(const1_add_tensor1.value(), vec![9.0]);
-    assert_tensor!(const1_sub_tensor1.value(), vec![-3.0]);
-    assert_tensor!(const1_mul_tensor1.value(), vec![18.0]);
-    assert_tensor!(const1_div_tensor1.value(), vec![0.5]);
-    assert_tensor!(const1_pow_tensor1.value(), vec![3.0_f64.powf(6.0)]);
+    assert_tensor!(&const1_add_tensor1, vec![9.0]);
+    assert_tensor!(&const1_sub_tensor1, vec![-3.0]);
+    assert_tensor!(&const1_mul_tensor1, vec![18.0]);
+    assert_tensor!(&const1_div_tensor1, vec![0.5]);
+    assert_tensor!(&const1_pow_tensor1, vec![3.0_f64.powf(6.0)]);
 
-    assert_tensor!(tensor1_add_const1.value(), vec![9.0]);
-    assert_tensor!(tensor1_sub_const1.value(), vec![3.0]);
-    assert_tensor!(tensor1_mul_const1.value(), vec![18.0]);
-    assert_tensor!(tensor1_div_const1.value(), vec![2.0]);
-    assert_tensor!(tensor1_pow_const1.value(), vec![6.0_f64.powf(3.0)]);
+    assert_tensor!(&tensor1_add_const1, vec![9.0]);
+    assert_tensor!(&tensor1_sub_const1, vec![3.0]);
+    assert_tensor!(&tensor1_mul_const1, vec![18.0]);
+    assert_tensor!(&tensor1_div_const1, vec![2.0]);
+    assert_tensor!(&tensor1_pow_const1, vec![6.0_f64.powf(3.0)]);
 
-    assert_tensor!(tensor1_add_tensor2.value(), vec![2.0]);
-    assert_tensor!(tensor1_sub_tensor2.value(), vec![10.0]);
-    assert_tensor!(tensor1_mul_tensor2.value(), vec![-24.0]);
-    assert_tensor!(tensor1_div_tensor2.value(), vec![-1.5]);
-    assert_tensor!(tensor2_pow_tensor1.value(), vec![(-4.0_f64).powf(6.0)]);
+    assert_tensor!(&tensor1_add_tensor2, vec![2.0]);
+    assert_tensor!(&tensor1_sub_tensor2, vec![10.0]);
+    assert_tensor!(&tensor1_mul_tensor2, vec![-24.0]);
+    assert_tensor!(&tensor1_div_tensor2, vec![-1.5]);
+    assert_tensor!(&tensor2_pow_tensor1, vec![(-4.0_f64).powf(6.0)]);
 }
 
 #[test]
@@ -437,21 +482,21 @@ fn unary_op() {
     let tensor1_exp = tensor1.exp();
     let tensor1_abs = tensor1.abs();
     let tensor1_erf = tensor1.erf();
-    assert_tensor!(tensor1_neg.value(), values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sin.value(), values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_cos.value(), values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tanh.value(), values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tan.value(), values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_ceil.value(), values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_floor.value(), values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_round.value(), values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sign.value(), values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqrt.value(), values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqr.value(), values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_log.value(), values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_exp.value(), values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_abs.value(), values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_erf.value(), values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_neg, values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sin, values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_cos, values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tanh, values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tan, values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_ceil, values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_floor, values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_round, values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sign, values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqrt, values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqr, values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_log, values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_exp, values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_abs, values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_erf, values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
 
     let const1_neg = const1.neg();
     let const1_sin = const1.sin();
@@ -468,93 +513,129 @@ fn unary_op() {
     let const1_exp = const1.exp();
     let const1_abs = const1.abs();
     let const1_erf = const1.erf();
-    assert_scalar!(const1_neg.value(), Neg::neg(x1));
-    assert_scalar!(const1_sin.value(), f64::sin(x1));
-    assert_scalar!(const1_cos.value(), f64::cos(x1));
-    assert_scalar!(const1_tanh.value(), f64::tanh(x1));
-    assert_scalar!(const1_tan.value(), f64::tan(x1));
-    assert_scalar!(const1_ceil.value(), f64::ceil(x1));
-    assert_scalar!(const1_floor.value(), f64::floor(x1));
-    assert_scalar!(const1_round.value(), f64::round(x1));
-    assert_scalar!(const1_sign.value(), f64::signum(x1));
-    assert_scalar!(const1_sqrt.value(), f64::sqrt(x1));
-    assert_scalar!(const1_sqr.value(), f64::powi(x1, 2));
-    assert_scalar!(const1_log.value(), f64::ln(x1));
-    assert_scalar!(const1_exp.value(), f64::exp(x1));
-    assert_scalar!(const1_abs.value(), f64::abs(x1));
-    assert_scalar!(const1_erf.value(), candle_core::cpu::erf::erf(x1));
+    assert_scalar!(&const1_neg, Neg::neg(x1));
+    assert_scalar!(&const1_sin, f64::sin(x1));
+    assert_scalar!(&const1_cos, f64::cos(x1));
+    assert_scalar!(&const1_tanh, f64::tanh(x1));
+    assert_scalar!(&const1_tan, f64::tan(x1));
+    assert_scalar!(&const1_ceil, f64::ceil(x1));
+    assert_scalar!(&const1_floor, f64::floor(x1));
+    assert_scalar!(&const1_round, f64::round(x1));
+    assert_scalar!(&const1_sign, f64::signum(x1));
+    assert_scalar!(&const1_sqrt, f64::sqrt(x1));
+    assert_scalar!(&const1_sqr, f64::powi(x1, 2));
+    assert_scalar!(&const1_log, f64::ln(x1));
+    assert_scalar!(&const1_exp, f64::exp(x1));
+    assert_scalar!(&const1_abs, f64::abs(x1));
+    assert_scalar!(&const1_erf, candle_core::cpu::erf::erf(x1));
+
+    let candle_var_tensor1 = candle_core::Var::new(values1.clone(), &candle_core::Device::Cpu).unwrap();
+    let candle_tensor1 = candle_var_tensor1.as_tensor();
+
+    let candle_tensor1_neg = candle_tensor1.neg().unwrap();
+    let candle_tensor1_sin = candle_tensor1.sin().unwrap();
+    let candle_tensor1_cos = candle_tensor1.cos().unwrap();
+    let candle_tensor1_tanh = candle_tensor1.tanh().unwrap();
+    let candle_tensor1_ceil = candle_tensor1.ceil().unwrap();
+    let candle_tensor1_floor = candle_tensor1.floor().unwrap();
+    let candle_tensor1_round = candle_tensor1.round().unwrap();
+    let candle_tensor1_sign = candle_tensor1.sign().unwrap();
+    let candle_tensor1_sqrt = candle_tensor1.sqrt().unwrap();
+    let candle_tensor1_sqr = candle_tensor1.sqr().unwrap();
+    let candle_tensor1_log = candle_tensor1.log().unwrap();
+    let candle_tensor1_exp = candle_tensor1.exp().unwrap();
+    let candle_tensor1_abs = candle_tensor1.abs().unwrap();
+    let candle_tensor1_erf = candle_tensor1.erf().unwrap();
+    assert_candle_tensor!(&tensor1_neg, &candle_tensor1_neg, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_sin, &candle_tensor1_sin, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_cos, &candle_tensor1_cos, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_tanh, &candle_tensor1_tanh, (&tensor1_ref, candle_tensor1));
+    // FIXME
+    // assert_candle_tensor!(&tensor1_ceil, &candle_tensor1_ceil, (&tensor1_ref, candle_tensor1));
+    // FIXME
+    // assert_candle_tensor!(&tensor1_floor, &candle_tensor1_floor, (&tensor1_ref, candle_tensor1));
+    // FIXME
+    // assert_candle_tensor!(&tensor1_round, &candle_tensor1_round, (&tensor1_ref, candle_tensor1));
+    // FIXME
+    // assert_candle_tensor!(&tensor1_sign, &candle_tensor1_sign, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_sqrt, &candle_tensor1_sqrt, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_sqr, &candle_tensor1_sqr, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_log, &candle_tensor1_log, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_exp, &candle_tensor1_exp, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_abs, &candle_tensor1_abs, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_erf, &candle_tensor1_erf, (&tensor1_ref, candle_tensor1));
 
     // Update1
     let values1 = vec![1.0, 2.0];
     before_update();
     tensor1_ref.assgin(values1.clone());
 
-    assert_tensor!(tensor1_neg.value(), values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sin.value(), values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_cos.value(), values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tanh.value(), values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tan.value(), values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_ceil.value(), values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_floor.value(), values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_round.value(), values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sign.value(), values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqrt.value(), values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqr.value(), values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_log.value(), values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_exp.value(), values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_abs.value(), values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_erf.value(), values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_neg, values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sin, values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_cos, values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tanh, values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tan, values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_ceil, values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_floor, values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_round, values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sign, values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqrt, values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqr, values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_log, values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_exp, values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_abs, values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_erf, values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
 
-    assert_scalar!(const1_neg.value(), Neg::neg(x1));
-    assert_scalar!(const1_sin.value(), f64::sin(x1));
-    assert_scalar!(const1_cos.value(), f64::cos(x1));
-    assert_scalar!(const1_tanh.value(), f64::tanh(x1));
-    assert_scalar!(const1_tan.value(), f64::tan(x1));
-    assert_scalar!(const1_ceil.value(), f64::ceil(x1));
-    assert_scalar!(const1_floor.value(), f64::floor(x1));
-    assert_scalar!(const1_round.value(), f64::round(x1));
-    assert_scalar!(const1_sign.value(), f64::signum(x1));
-    assert_scalar!(const1_sqrt.value(), f64::sqrt(x1));
-    assert_scalar!(const1_sqr.value(), f64::powi(x1, 2));
-    assert_scalar!(const1_log.value(), f64::ln(x1));
-    assert_scalar!(const1_exp.value(), f64::exp(x1));
-    assert_scalar!(const1_abs.value(), f64::abs(x1));
-    assert_scalar!(const1_erf.value(), candle_core::cpu::erf::erf(x1));
+    assert_scalar!(&const1_neg, Neg::neg(x1));
+    assert_scalar!(&const1_sin, f64::sin(x1));
+    assert_scalar!(&const1_cos, f64::cos(x1));
+    assert_scalar!(&const1_tanh, f64::tanh(x1));
+    assert_scalar!(&const1_tan, f64::tan(x1));
+    assert_scalar!(&const1_ceil, f64::ceil(x1));
+    assert_scalar!(&const1_floor, f64::floor(x1));
+    assert_scalar!(&const1_round, f64::round(x1));
+    assert_scalar!(&const1_sign, f64::signum(x1));
+    assert_scalar!(&const1_sqrt, f64::sqrt(x1));
+    assert_scalar!(&const1_sqr, f64::powi(x1, 2));
+    assert_scalar!(&const1_log, f64::ln(x1));
+    assert_scalar!(&const1_exp, f64::exp(x1));
+    assert_scalar!(&const1_abs, f64::abs(x1));
+    assert_scalar!(&const1_erf, candle_core::cpu::erf::erf(x1));
 
     // Update2
     let values1 = vec![1.0, 2.0];
     tensor1_ref.assgin(values1.clone());
     before_update();
 
-    assert_tensor!(tensor1_neg.value(), values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sin.value(), values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_cos.value(), values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tanh.value(), values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_tan.value(), values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_ceil.value(), values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_floor.value(), values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_round.value(), values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sign.value(), values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqrt.value(), values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_sqr.value(), values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_log.value(), values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_exp.value(), values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_abs.value(), values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
-    assert_tensor!(tensor1_erf.value(), values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_neg, values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sin, values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_cos, values1.iter().map(|x| f64::cos(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tanh, values1.iter().map(|x| f64::tanh(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_tan, values1.iter().map(|x| f64::tan(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_ceil, values1.iter().map(|x| f64::ceil(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_floor, values1.iter().map(|x| f64::floor(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_round, values1.iter().map(|x| f64::round(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sign, values1.iter().map(|x| f64::signum(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqrt, values1.iter().map(|x| f64::sqrt(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_sqr, values1.iter().map(|x| f64::powi(*x, 2)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_log, values1.iter().map(|x| f64::ln(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_exp, values1.iter().map(|x| f64::exp(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_abs, values1.iter().map(|x| f64::abs(*x)).collect::<Vec<_>>());
+    assert_tensor!(&tensor1_erf, values1.iter().map(|x| candle_core::cpu::erf::erf(*x)).collect::<Vec<_>>());
 
-    assert_scalar!(const1_neg.value(), Neg::neg(x1));
-    assert_scalar!(const1_sin.value(), f64::sin(x1));
-    assert_scalar!(const1_cos.value(), f64::cos(x1));
-    assert_scalar!(const1_tanh.value(), f64::tanh(x1));
-    assert_scalar!(const1_tan.value(), f64::tan(x1));
-    assert_scalar!(const1_ceil.value(), f64::ceil(x1));
-    assert_scalar!(const1_floor.value(), f64::floor(x1));
-    assert_scalar!(const1_round.value(), f64::round(x1));
-    assert_scalar!(const1_sign.value(), f64::signum(x1));
-    assert_scalar!(const1_sqrt.value(), f64::sqrt(x1));
-    assert_scalar!(const1_sqr.value(), f64::powi(x1, 2));
-    assert_scalar!(const1_log.value(), f64::ln(x1));
-    assert_scalar!(const1_exp.value(), f64::exp(x1));
-    assert_scalar!(const1_abs.value(), f64::abs(x1));
-    assert_scalar!(const1_erf.value(), candle_core::cpu::erf::erf(x1));
+    assert_scalar!(&const1_neg, Neg::neg(x1));
+    assert_scalar!(&const1_sin, f64::sin(x1));
+    assert_scalar!(&const1_cos, f64::cos(x1));
+    assert_scalar!(&const1_tanh, f64::tanh(x1));
+    assert_scalar!(&const1_tan, f64::tan(x1));
+    assert_scalar!(&const1_ceil, f64::ceil(x1));
+    assert_scalar!(&const1_floor, f64::floor(x1));
+    assert_scalar!(&const1_round, f64::round(x1));
+    assert_scalar!(&const1_sign, f64::signum(x1));
+    assert_scalar!(&const1_sqrt, f64::sqrt(x1));
+    assert_scalar!(&const1_sqr, f64::powi(x1, 2));
+    assert_scalar!(&const1_log, f64::ln(x1));
+    assert_scalar!(&const1_exp, f64::exp(x1));
+    assert_scalar!(&const1_abs, f64::abs(x1));
+    assert_scalar!(&const1_erf, candle_core::cpu::erf::erf(x1));
 }
