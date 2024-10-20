@@ -105,7 +105,7 @@ impl Expression {
                     Op::Cmp(expression, cmp_op) => todo!(),
                     Op::Unary(node, unary_op) => todo!(),
                     Op::Binary(lhs, rhs, binary_op) => {
-                        binary_op.backward(lhs, rhs, &mut grads, grad);
+                        binary_op.backward(tensor, lhs, rhs, &mut grads, grad);
                     }
                 }
             }
@@ -162,51 +162,62 @@ impl GradStore {
 }
 
 impl BinaryOp {
-    fn backward(&self, lhs: &Expression, rhs: &Expression, grads: &mut GradStore, grad: Grad) {
+    fn backward(
+        &self,
+        tensor: &Tensor,
+        lhs: &Expression,
+        rhs: &Expression,
+        grads: &mut GradStore,
+        grad: Grad,
+    ) {
         let [fn_backward_lhs, fn_backward_rhs] = self.fn_backward();
         match (lhs, rhs) {
             (Expression::Const(_), Expression::Const(_)) => unreachable!(),
             (Expression::Const(lhs_x), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
-                    for (rhs_grad, grad_x, rhs_x) in itertools::izip!(
+                    for (rhs_grad, res, grad_x, rhs_x) in itertools::izip!(
                         rhs_sum_grad.iter_mut(),
+                        tensor.values().read().unwrap().iter(),
                         grad.iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_rhs(*lhs_x, *rhs_x, *grad_x, rhs_grad);
+                        fn_backward_rhs(lhs_x, rhs_x, res, grad_x, rhs_grad);
                     }
                 }
             }
             (Expression::Tensor(lhs_tensor), Expression::Const(rhs_x)) => {
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
-                    for (lhs_grad, grad_x, lhs_x) in itertools::izip!(
+                    for (lhs_grad, res, grad_x, lhs_x) in itertools::izip!(
                         lhs_sum_grad.iter_mut(),
+                        tensor.values().read().unwrap().iter(),
                         grad.iter(),
                         lhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_lhs(*lhs_x, *rhs_x, *grad_x, lhs_grad);
+                        fn_backward_lhs(lhs_x, rhs_x, grad_x, res, lhs_grad);
                     }
                 }
             }
             (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
-                    for (rhs_grad, grad_x, lhs_x, rhs_x) in itertools::izip!(
+                    for (rhs_grad, res, grad_x, lhs_x, rhs_x) in itertools::izip!(
                         rhs_sum_grad.iter_mut(),
+                        tensor.values().read().unwrap().iter(),
                         grad.iter(),
                         lhs_tensor.values().read().unwrap().iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_rhs(*lhs_x, *rhs_x, *grad_x, rhs_grad);
+                        fn_backward_rhs(lhs_x, rhs_x, res, grad_x, rhs_grad);
                     }
                 }
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
-                    for (lhs_grad, grad_x, lhs_x, rhs_x) in itertools::izip!(
+                    for (lhs_grad, res, grad_x, lhs_x, rhs_x) in itertools::izip!(
                         lhs_sum_grad.iter_mut(),
+                        tensor.values().read().unwrap().iter(),
                         grad.iter(),
                         lhs_tensor.values().read().unwrap().iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_lhs(*lhs_x, *rhs_x, *grad_x, lhs_grad);
+                        fn_backward_lhs(lhs_x, rhs_x, res, grad_x, lhs_grad);
                     }
                 }
             }

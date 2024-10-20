@@ -1,6 +1,7 @@
 #![cfg(test)]
 use itertools::izip;
 use ordered_float::OrderedFloat;
+use serial_test::serial;
 
 use crate::{before_update, Expression};
 use std::ops::*;
@@ -10,21 +11,36 @@ use super::{autograd::Grad, ScalarTensor};
 /// can NOT run test parallelly,
 /// since the test functions will use global COUNTER
 #[test]
+#[serial]
 fn test() {
     binary_op();
     unary_op();
-    backward_mut_add();
+    backward_mul_add();
     backward_pow();
+    backward_min_max();
 }
 
 #[test]
+#[serial]
 fn gradient_decent() {
-    let (x, x_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
-    let (y, y_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let n = 200;
+    let iter = 10000;
     let step = 0.01;
+    let (x, x_ref) = Expression::uniform(n, -10.0, 10.0, true);
+    let (y, y_ref) = Expression::uniform(n, -10.0, 10.0, true);
     let f = &x.mul(&x) + &y.mul(&y);
-    for i in 0..1000 {
-        println!("f=x^2+y^2 iter {i} {}", f.value());
+    let mut loss = f64::MAX;
+    for i in 0..iter {
+        if i % 200 == 0 {
+            let new_loss = if let ScalarTensor::Tensor(tensor) = f.value() {
+                tensor.read().unwrap().iter().fold(0.0, |sum,x|sum+x) / n as f64
+            } else {
+                unreachable!()
+            };
+            assert!(new_loss<loss);
+            loss = new_loss;
+            println!("iter {i}; loss = x^2+y^2 = {loss:5e}");
+        }
         let grads = f.backward();
         let df_dx = grads.get(&x_ref).unwrap();
         let df_dy = grads.get(&y_ref).unwrap();
@@ -32,7 +48,12 @@ fn gradient_decent() {
         x_ref.update_callback(&df_dx, |d: &f64| -d * step);
         y_ref.update_callback(&df_dy, |d: &f64| -d * step);
     }
-    println!("f=x^2+y^2 Finally {}", f.value());
+    let loss = if let ScalarTensor::Tensor(tensor) = f.value() {
+        tensor.read().unwrap().iter().fold(0.0, |sum,x|sum+x) / n as f64
+    } else {
+        unreachable!()
+    };
+    println!("iter {iter}; loss = x^2+y^2 = {loss:5e}");
 }
 #[test]
 fn utils_ok() {
@@ -43,6 +64,26 @@ fn utils_ok() {
 #[should_panic]
 fn utils_should_panic() {
     assert_eq_vec(&[1.0, 2.0], &[1.1, 2.0]);
+}
+
+#[test]
+#[should_panic]
+fn len_mismatch_init() {
+    let (x, _) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let (y, _) = Expression::tensor(vec![1.0, 2.0], true);
+    _ = x.add(&y);
+}
+
+#[test]
+#[serial]
+#[should_panic]
+fn len_mismatch_update() {
+    let (x, x_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let (y, _) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let f = x.add(&y);
+    before_update();
+    x_ref.assgin(vec![1.0]);
+    _ = f.value();
 }
 
 fn assert_eq_vec(lhs: &[f64], rhs: &[f64]) {
@@ -84,7 +125,7 @@ pub fn assert_scalar(got: ScalarTensor<'_>, want: f64) {
 }
 
 #[rustfmt::skip]
-fn backward_mut_add() {
+fn backward_mul_add() {
     let (a, a_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
     let (b, b_ref) = Expression::tensor(vec![-1.0, -2.0, -3.0], true);
     let (c, c_ref) = Expression::tensor(vec![4.0, -2.0, 9.0], true);
@@ -138,6 +179,24 @@ fn backward_pow() {
     let df_db = grads.get(&b_ref);
     assert_grad(df_da, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|b_x*a_x.powf(b_x-1.0)).collect());
     assert_grad(df_db, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|a_x.powf(*b_x)*a_x.ln()).collect());
+}
+
+#[rustfmt::skip]
+fn backward_min_max() {
+    let (a, a_ref) = Expression::tensor(vec![1.5, 2.0, 5.0], true);
+    let (b, b_ref) = Expression::tensor(vec![3.0, 2.0, 4.0], true);
+    let max = a.max(&b);
+    let min = a.min(&b);
+    let max_grads = max.backward();
+    let min_grads = min.backward();
+    let dmax_da = max_grads.get(&a_ref);
+    let dmin_da = min_grads.get(&a_ref);
+    let dmax_db = max_grads.get(&b_ref);
+    let dmin_db = min_grads.get(&b_ref);
+    assert_grad(dmax_da, vec![0.0, 0.5, 1.0]);
+    assert_grad(dmin_da, vec![1.0, 0.5, 0.0]);
+    assert_grad(dmax_db, vec![1.0, 0.5, 0.0]);
+    assert_grad(dmin_db, vec![0.0, 0.5, 1.0]);
 }
 
 #[rustfmt::skip]

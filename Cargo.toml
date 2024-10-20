@@ -40,3 +40,6 @@ log = { version = "0.4", features = ["std", "serde"] }
 thiserror = "1.0"
 nom = "7.1"
 pyo3 = { version = "0.22.4", features = ["extension-module"] }
+num-traits = "0.2.19"
+rand = "0.8.5"
+serial_test = "0.5"
