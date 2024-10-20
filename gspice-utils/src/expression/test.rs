@@ -1,4 +1,5 @@
 #![cfg(test)]
+use itertools::izip;
 use ordered_float::OrderedFloat;
 
 use crate::{before_update, Expression};
@@ -12,20 +13,37 @@ use super::{autograd::Grad, ScalarTensor};
 fn test() {
     binary_op();
     unary_op();
-    backward();
+    backward_mut_add();
+    backward_pow();
 }
 
 #[test]
+fn gradient_decent() {
+    let (x, x_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let (y, y_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let step = 0.01;
+    let f = &x.mul(&x) + &y.mul(&y);
+    for i in 0..1000 {
+        println!("f=x^2+y^2 iter {i} {}", f.value());
+        let grads = f.backward();
+        let df_dx = grads.get(&x_ref).unwrap();
+        let df_dy = grads.get(&y_ref).unwrap();
+        before_update();
+        x_ref.update_callback(&df_dx, |d: &f64| -d * step);
+        y_ref.update_callback(&df_dy, |d: &f64| -d * step);
+    }
+    println!("f=x^2+y^2 Finally {}", f.value());
+}
+#[test]
 fn utils_ok() {
-    assert_eq_vec(&[1.0,2.0], &[1.0,2.0]);
+    assert_eq_vec(&[1.0, 2.0], &[1.0, 2.0]);
 }
 
 #[test]
 #[should_panic]
 fn utils_should_panic() {
-    assert_eq_vec(&[1.0,2.0], &[1.1,2.0]);
+    assert_eq_vec(&[1.0, 2.0], &[1.1, 2.0]);
 }
-
 
 fn assert_eq_vec(lhs: &[f64], rhs: &[f64]) {
     assert!(
@@ -42,7 +60,7 @@ fn assert_grad(grad: Option<&Grad>, values: Vec<f64>) {
     if let Some(grad) = grad {
         assert_eq_vec(&grad, &values);
     } else {
-        panic!("No grad")
+        panic!("No grad");
     }
 }
 
@@ -66,7 +84,7 @@ pub fn assert_scalar(got: ScalarTensor<'_>, want: f64) {
 }
 
 #[rustfmt::skip]
-fn backward() {
+fn backward_mut_add() {
     let (a, a_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
     let (b, b_ref) = Expression::tensor(vec![-1.0, -2.0, -3.0], true);
     let (c, c_ref) = Expression::tensor(vec![4.0, -2.0, 9.0], true);
@@ -81,9 +99,9 @@ fn backward() {
 
     // Update 1
     before_update();
-    a_ref.update(vec![6.0]);
-    b_ref.update(vec![-4.0]);
-    c_ref.update(vec![2.0]);
+    a_ref.assgin(vec![6.0]);
+    b_ref.assgin(vec![-4.0]);
+    c_ref.assgin(vec![2.0]);
     f.value();
     let grads = f.backward();
     let df_da = grads.get(&a_ref);
@@ -95,9 +113,9 @@ fn backward() {
 
     // Update 2
     before_update();
-    a_ref.update(vec![2.0]);
-    b_ref.update(vec![5.0]);
-    c_ref.update(vec![2.0]);
+    a_ref.assgin(vec![2.0]);
+    b_ref.assgin(vec![5.0]);
+    c_ref.assgin(vec![2.0]);
     f.value();
     let grads = f.backward();
     let df_da = grads.get(&a_ref);
@@ -108,13 +126,19 @@ fn backward() {
     assert_grad(df_dc, vec![1.0]);
 }
 
-// #[rustfmt::skip]
-// fn backward_pow() {
-//     let (a, a_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
-//     let (b, b_ref) = Expression::tensor(vec![-1.0, -2.0, -3.0], true);
-//     let (c, c_ref) = Expression::tensor(vec![4.0, -2.0, 9.0], true);
-//     let c = a
-// }
+#[rustfmt::skip]
+fn backward_pow() {
+    let a_vec = vec![1.5, 2.0, 3.0];
+    let b_vec = vec![3.0, 2.0, 4.0];
+    let (a, a_ref) = Expression::tensor(a_vec.clone(), true);
+    let (b, b_ref) = Expression::tensor(b_vec.clone(), true);
+    let f = a.pow(&b);
+    let grads = f.backward();
+    let df_da = grads.get(&a_ref);
+    let df_db = grads.get(&b_ref);
+    assert_grad(df_da, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|b_x*a_x.powf(b_x-1.0)).collect());
+    assert_grad(df_db, izip!(a_vec.iter(),b_vec.iter()).map(|(a_x,b_x)|a_x.powf(*b_x)*a_x.ln()).collect());
+}
 
 #[rustfmt::skip]
 fn binary_op() {
@@ -179,8 +203,8 @@ fn binary_op() {
     assert_ref(tensor2_pow_ref1.value(), vec![-1.0, 4.0, -27.0]);
     // Update 1
     before_update();
-    tensor1_ref.update(vec![-3.0, 6.0]);
-    tensor2_ref.update(vec![3.0, -4.0]);
+    tensor1_ref.assgin(vec![-3.0, 6.0]);
+    tensor2_ref.assgin(vec![3.0, -4.0]);
 
     assert_ref(const2_max_ref2.value(), vec![3.0, -2.0]);
     assert_ref(const2_min_ref2.value(), vec![-2.0, -4.0]);
@@ -211,8 +235,8 @@ fn binary_op() {
 
     // Update 2
     before_update();
-    tensor1_ref.update(vec![6.0]);
-    tensor2_ref.update(vec![-4.0]);
+    tensor1_ref.assgin(vec![6.0]);
+    tensor2_ref.assgin(vec![-4.0]);
 
     assert_ref(const2_max_ref2.value(), vec![-2.0]);
     assert_ref(const2_min_ref2.value(), vec![-4.0]);
@@ -316,7 +340,7 @@ fn unary_op() {
     // Update1
     let values1 = vec![1.0, 2.0];
     before_update();
-    tensor1_ref.update(values1.clone());
+    tensor1_ref.assgin(values1.clone());
 
     assert_ref(tensor1_neg.value(), values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
     assert_ref(tensor1_sin.value(), values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
@@ -352,7 +376,7 @@ fn unary_op() {
 
     // Update2
     let values1 = vec![1.0, 2.0];
-    tensor1_ref.update(values1.clone());
+    tensor1_ref.assgin(values1.clone());
     before_update();
 
     assert_ref(tensor1_neg.value(), values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());

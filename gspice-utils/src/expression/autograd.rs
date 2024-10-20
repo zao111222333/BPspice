@@ -83,6 +83,9 @@ impl Expression {
         walk(self, &mut already_seen);
         already_seen
     }
+    /// When you update the compute graph's tensor value.
+    /// You need [self.value](Expression::value) before
+    /// run [self.backward](Expression::backward) to update its compute graph's value
     pub fn backward(&self) -> GradStore {
         let sorted_nodes = self.sorted_nodes();
         if let Some((first_id, first_tensor)) = sorted_nodes.first_key_value() {

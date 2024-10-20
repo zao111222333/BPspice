@@ -6,11 +6,10 @@ mod test;
 
 pub use recompute::before_update;
 
-use std::sync::{Arc, RwLock};
-
 use autograd::GradId;
 use op::Op;
 use recompute::ChangeMarker;
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug)]
 pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker, Op)>);
@@ -19,10 +18,36 @@ pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker, Op)>);
 pub struct TensorRef(Tensor);
 
 impl TensorRef {
-    /// Need [`before_update`] before call this
-    pub fn update(&self, values: Vec<f64>) {
+    /// Need [`before_update`] before calling this
+    ///
+    /// Need [`Expression::value`](Expression::value) after calling this
+    ///
+    /// Tensor = values
+    pub fn assgin(&self, values: Vec<f64>) {
         let mut write = self.0.values().write().unwrap();
         *write = values;
+        self.0.change_marker().mark_searched_change();
+    }
+    /// Need [`before_update`] before calling this
+    ///
+    /// Need [`Expression::value`](Expression::value) after calling this
+    ///
+    /// Tensor += delta
+    pub fn update(&self, delta: &[f64]) {
+        let mut write = self.0.values().write().unwrap();
+        assert_eq!(write.len(), delta.len());
+        write.iter_mut().zip(delta).for_each(|(x, d)| *x += d);
+        self.0.change_marker().mark_searched_change();
+    }
+    /// Need [`before_update`] before calling this
+    ///
+    /// Need [`Expression::value`](Expression::value) after calling this
+    ///
+    /// Tensor += f(delta)
+    pub fn update_callback(&self, delta: &[f64], f: impl Fn(&f64) -> f64) {
+        let mut write = self.0.values().write().unwrap();
+        assert_eq!(write.len(), delta.len());
+        write.iter_mut().zip(delta).for_each(|(x, d)| *x += f(d));
         self.0.change_marker().mark_searched_change();
     }
 }

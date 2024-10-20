@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-// use std::ops::*;
 #[pyclass]
 struct Expr(gspice::Expression);
 
