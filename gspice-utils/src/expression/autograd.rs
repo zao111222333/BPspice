@@ -197,7 +197,7 @@ impl UnaryOp {
 }
 
 impl Powf {
-    fn backward(n: f64, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad){
+    fn backward(n: f64, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
         match node {
             Expression::Const(_) => unreachable!(),
             Expression::Tensor(node_tensor) => {
@@ -211,7 +211,7 @@ impl Powf {
                         Self::fn_backward(x, n, res, grad, sum_grad);
                     }
                 }
-            },
+            }
         }
     }
 }

@@ -1,21 +1,17 @@
-use std::{
-    cmp::Ordering,
-    sync::{Arc, RwLock},
-};
-
+use itertools::izip;
+use num_traits::Zero;
 use ordered_float::OrderedFloat;
+use std::cmp::Ordering;
 
-use super::{ChangeMarker, Expression, GradId, Tensor};
+use super::{Expression, GradId, Tensor};
 
 #[derive(Clone, Debug)]
 pub enum Op {
     /// new assign
     Assgin,
-    // Copy(Expression),
     Powf(Expression, f64),
-    // (cond)? when_true : when_false
+    /// (cond)? when_true : when_false
     Cond(Expression, Expression, Expression),
-    // Cmp(Expression, CmpOp),
     Unary(Expression, UnaryOp),
     Binary(Expression, Expression, BinaryOp),
 }
@@ -42,6 +38,187 @@ impl Expression {
                 n,
                 Powf::fn_op,
                 Op::Powf(Self::Tensor(tensor.clone()), n),
+            )),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////   Cond   ///////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
+pub(super) struct Cond;
+impl Cond {
+    pub(super) fn fn_op(cond: &f64, when_true: f64, when_false: f64) -> f64 {
+        if cond.is_zero() {
+            when_false
+        } else {
+            when_true
+        }
+    }
+    pub(super) fn fn_backward_when_true(cond: &f64, grad: &f64, sum_grad: &mut f64) {
+        if !cond.is_zero() {
+            *sum_grad += grad;
+        }
+    }
+    pub(super) fn fn_backward_when_false(cond: &f64, grad: &f64, sum_grad: &mut f64) {
+        if cond.is_zero() {
+            *sum_grad += grad;
+        }
+    }
+}
+impl Cond {
+    pub(super) fn iter_tensor_x_x(
+        cond_tensor: &Tensor,
+        when_true_x: f64,
+        when_false_x: f64,
+    ) -> Vec<f64> {
+        cond_tensor
+            .values()
+            .read()
+            .unwrap()
+            .iter()
+            .map(|cond_x| Cond::fn_op(cond_x, when_true_x, when_false_x))
+            .collect()
+    }
+    pub(super) fn iter_tensor_x_tensor(
+        cond_tensor: &Tensor,
+        when_true_x: f64,
+        when_false_tensor: &Tensor,
+    ) -> Vec<f64> {
+        izip!(
+            cond_tensor.values().read().unwrap().iter(),
+            when_false_tensor.values().read().unwrap().iter()
+        )
+        .map(|(cond_x, when_false_x)| Cond::fn_op(cond_x, when_true_x, *when_false_x))
+        .collect()
+    }
+    pub(super) fn iter_tensor_tensor_x(
+        cond_tensor: &Tensor,
+        when_true_tensor: &Tensor,
+        when_false_x: f64,
+    ) -> Vec<f64> {
+        izip!(
+            cond_tensor.values().read().unwrap().iter(),
+            when_true_tensor.values().read().unwrap().iter(),
+        )
+        .map(|(cond_x, when_true_x)| Cond::fn_op(cond_x, *when_true_x, when_false_x))
+        .collect()
+    }
+    pub(super) fn iter_tensor_tensor_tensor(
+        cond_tensor: &Tensor,
+        when_true_tensor: &Tensor,
+        when_false_tensor: &Tensor,
+    ) -> Vec<f64> {
+        izip!(
+            cond_tensor.values().read().unwrap().iter(),
+            when_true_tensor.values().read().unwrap().iter(),
+            when_false_tensor.values().read().unwrap().iter()
+        )
+        .map(|(cond_x, when_true_x, when_false_x)| Cond::fn_op(cond_x, *when_true_x, *when_false_x))
+        .collect()
+    }
+}
+impl Expression {
+    /// `&self` as condition, is_zero = false, otherwise = true
+    #[inline]
+    pub fn cond(&self, when_true: &Self, when_false: &Self) -> Self {
+        match (self, when_true, when_false) {
+            (Self::Const(cond_x), Self::Const(when_true_x), Self::Const(when_false_x)) => {
+                Self::Const(Cond::fn_op(cond_x, *when_true_x, *when_false_x))
+            }
+            (Self::Const(cond_x), Self::Const(when_true_x), Self::Tensor(when_false_tensor)) => {
+                if cond_x.is_zero() {
+                    // FIXME: check
+                    Self::Tensor(when_false_tensor.clone())
+                } else {
+                    Self::Const(*when_true_x)
+                }
+            }
+            (Self::Const(cond_x), Self::Tensor(when_true_tensor), Self::Const(when_false_x)) => {
+                if cond_x.is_zero() {
+                    // FIXME: check
+                    Self::Const(*when_false_x)
+                } else {
+                    Self::Tensor(when_true_tensor.clone())
+                }
+            }
+            (
+                Self::Const(cond_x),
+                Self::Tensor(when_true_tensor),
+                Self::Tensor(when_false_tensor),
+            ) => {
+                if cond_x.is_zero() {
+                    // FIXME: check
+                    Self::Tensor(when_false_tensor.clone())
+                } else {
+                    Self::Tensor(when_true_tensor.clone())
+                }
+            }
+            (Self::Tensor(cond_tensor), Self::Const(when_true_x), Self::Const(when_false_x)) => {
+                Self::Tensor(Tensor::new(
+                    None,
+                    Cond::iter_tensor_x_x(cond_tensor, *when_true_x, *when_false_x),
+                    Op::Cond(
+                        Self::Tensor(cond_tensor.clone()),
+                        Self::Const(*when_true_x),
+                        Self::Const(*when_false_x),
+                    ),
+                ))
+            }
+            (
+                Self::Tensor(cond_tensor),
+                Self::Const(when_true_x),
+                Self::Tensor(when_false_tensor),
+            ) => Self::Tensor(Tensor::new(
+                if cond_tensor.with_grad() || when_false_tensor.with_grad() {
+                    Some(GradId::new())
+                } else {
+                    None
+                },
+                Cond::iter_tensor_x_tensor(cond_tensor, *when_true_x, when_false_tensor),
+                Op::Cond(
+                    Self::Tensor(cond_tensor.clone()),
+                    Self::Const(*when_true_x),
+                    Self::Tensor(when_false_tensor.clone()),
+                ),
+            )),
+            (
+                Self::Tensor(cond_tensor),
+                Self::Tensor(when_true_tensor),
+                Self::Const(when_false_x),
+            ) => Self::Tensor(Tensor::new(
+                if cond_tensor.with_grad() || when_true_tensor.with_grad() {
+                    Some(GradId::new())
+                } else {
+                    None
+                },
+                Cond::iter_tensor_tensor_x(cond_tensor, when_true_tensor, *when_false_x),
+                Op::Cond(
+                    Self::Tensor(cond_tensor.clone()),
+                    Self::Tensor(when_true_tensor.clone()),
+                    Self::Const(*when_false_x),
+                ),
+            )),
+            (
+                Self::Tensor(cond_tensor),
+                Self::Tensor(when_true_tensor),
+                Self::Tensor(when_false_tensor),
+            ) => Self::Tensor(Tensor::new(
+                if cond_tensor.with_grad()
+                    || when_true_tensor.with_grad()
+                    || when_false_tensor.with_grad()
+                {
+                    Some(GradId::new())
+                } else {
+                    None
+                },
+                Cond::iter_tensor_tensor_tensor(cond_tensor, when_true_tensor, when_false_tensor),
+                Op::Cond(
+                    Self::Tensor(cond_tensor.clone()),
+                    Self::Tensor(when_true_tensor.clone()),
+                    Self::Tensor(when_false_tensor.clone()),
+                ),
             )),
         }
     }
@@ -353,16 +530,15 @@ impl Tensor {
     }
     #[inline]
     pub(super) fn unary_op(&self, fn_op: fn(f64) -> f64, op: Op) -> Self {
-        Self(Arc::new((
-            if self.grad_id().is_some() {
+        Self::new(
+            if self.with_grad() {
                 Some(GradId::new())
             } else {
                 None
             },
-            RwLock::new(self.iter_unary_op(fn_op)),
-            ChangeMarker::new(),
+            self.iter_unary_op(fn_op),
             op,
-        )))
+        )
     }
 }
 
@@ -917,29 +1093,27 @@ impl Tensor {
     }
     #[inline]
     pub(super) fn binary_op(&self, rhs: &Self, fn_op: fn(f64, f64) -> f64, op: Op) -> Self {
-        Self(Arc::new((
-            if self.grad_id().is_some() || rhs.grad_id().is_some() {
+        Self::new(
+            if self.with_grad() || rhs.with_grad() {
                 Some(GradId::new())
             } else {
                 None
             },
-            RwLock::new(self.iter_binary_op(rhs, fn_op)),
-            ChangeMarker::new(),
+            self.iter_binary_op(rhs, fn_op),
             op,
-        )))
+        )
     }
     #[inline]
     pub(super) fn broadcast_binary_op(&self, rhs: f64, fn_op: fn(f64, f64) -> f64, op: Op) -> Self {
-        Self(Arc::new((
-            if self.grad_id().is_some() {
+        Self::new(
+            if self.with_grad() {
                 Some(GradId::new())
             } else {
                 None
             },
-            RwLock::new(self.broadcast_iter_binary_op(rhs, fn_op)),
-            ChangeMarker::new(),
+            self.broadcast_iter_binary_op(rhs, fn_op),
             op,
-        )))
+        )
     }
 }
 

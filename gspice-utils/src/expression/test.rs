@@ -20,7 +20,7 @@ macro_rules! assert_eq_vec {
                 && lhs
                     .iter()
                     .zip(rhs.iter())
-                    .all(|(x1, x2)| OrderedFloat(f64::abs(x1-x2)).le(&OrderedFloat($tolerance))),
+                    .all(|(x1, x2)| OrderedFloat(f64::abs(x1 - x2)).le(&OrderedFloat($tolerance))),
             "left:  {lhs:?}\nright: {rhs:?}"
         )
     };
@@ -183,6 +183,28 @@ fn len_mismatch_update() {
     before_update();
     x_ref.assgin(vec![1.0]);
     _ = f.value();
+}
+
+#[test]
+#[serial]
+#[rustfmt::skip]
+fn backward_clone() {
+    let (a, a_ref) = Expression::uniform(10, -10.0, 10.0, true);
+    let (b, b_ref) = Expression::uniform(10, -10.0, 10.0, true);
+    
+    let f = a.mul(&b);
+    let grads = f.backward();
+    let df_da = grads.get(&a_ref);
+    let df_db = grads.get(&b_ref);
+
+    let clone_f = a.clone().mul(&b);
+    let clone_grads = clone_f.backward();
+    let clone_df_da = clone_grads.get(&a_ref);
+    let clone_df_db = clone_grads.get(&b_ref);
+    
+    assert_eq_vec!(f.value().to_tensor().unwrap(), clone_f.value().to_tensor().unwrap());
+    assert_eq_vec!(&df_da.unwrap(), &clone_df_da.unwrap());
+    assert_eq_vec!(&df_db.unwrap(), &clone_df_db.unwrap());
 }
 
 #[test]
