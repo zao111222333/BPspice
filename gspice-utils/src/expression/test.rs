@@ -551,13 +551,13 @@ fn unary_op() {
     assert_candle_tensor!(&tensor1_cos, &candle_tensor1_cos, (&tensor1_ref, candle_tensor1));
     assert_candle_tensor!(&tensor1_tanh, &candle_tensor1_tanh, (&tensor1_ref, candle_tensor1));
     // FIXME
-    // assert_candle_tensor!(&tensor1_ceil, &candle_tensor1_ceil, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_ceil, &candle_tensor1_ceil);
     // FIXME
-    // assert_candle_tensor!(&tensor1_floor, &candle_tensor1_floor, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_floor, &candle_tensor1_floor);
     // FIXME
-    // assert_candle_tensor!(&tensor1_round, &candle_tensor1_round, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_round, &candle_tensor1_round);
     // FIXME
-    // assert_candle_tensor!(&tensor1_sign, &candle_tensor1_sign, (&tensor1_ref, candle_tensor1));
+    assert_candle_tensor!(&tensor1_sign, &candle_tensor1_sign);
     assert_candle_tensor!(&tensor1_sqrt, &candle_tensor1_sqrt, (&tensor1_ref, candle_tensor1));
     assert_candle_tensor!(&tensor1_sqr, &candle_tensor1_sqr, (&tensor1_ref, candle_tensor1));
     assert_candle_tensor!(&tensor1_log, &candle_tensor1_log, (&tensor1_ref, candle_tensor1));
