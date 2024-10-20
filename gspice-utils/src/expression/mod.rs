@@ -2,27 +2,43 @@ mod autograd;
 mod impls;
 mod op;
 mod recompute;
+mod test;
 
 pub use recompute::before_update;
 
-use op::Op;
-use autograd::GradId;
-use recompute::ChangeMarker;
-
 use std::sync::{Arc, RwLock};
+
+use autograd::GradId;
+use op::Op;
+use recompute::ChangeMarker;
 
 #[derive(Clone, Debug)]
 pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker, Op)>);
 
-impl Tensor {
+#[derive(Clone, Debug)]
+pub struct TensorRef(Tensor);
+
+impl TensorRef {
     /// Need [`before_update`] before call this
     pub fn update(&self, values: Vec<f64>) {
-        let mut write = self.values().write().unwrap();
+        let mut write = self.0.values().write().unwrap();
         *write = values;
-        self.change_marker().mark_searched_change();
+        self.0.change_marker().mark_searched_change();
     }
+}
+
+impl Tensor {
     pub fn values(&self) -> &RwLock<Vec<f64>> {
         &self.0 .1
+    }
+    pub fn with_grad(&self) -> bool {
+        self.0 .0.is_some()
+    }
+    fn zeros_like(&self) -> Vec<f64> {
+        vec![0.0; self.values().read().unwrap().len()]
+    }
+    fn ones_like(&self) -> Vec<f64> {
+        vec![1.0; self.values().read().unwrap().len()]
     }
     fn op(&self) -> &Op {
         &self.0 .3
@@ -53,15 +69,16 @@ impl Expression {
     pub fn constant(value: f64) -> Self {
         Self::Const(value)
     }
-    pub fn tensor(values: Vec<f64>, need_grad: bool) -> (Self, Tensor) {
+    pub fn tensor(values: Vec<f64>, need_grad: bool) -> (Self, TensorRef) {
         let tensor = Tensor(Arc::new((
             if need_grad { Some(GradId::new()) } else { None },
             RwLock::new(values),
             ChangeMarker::new(),
             Op::Assgin,
         )));
-        (Self::Tensor(tensor.clone()), tensor)
+        (Self::Tensor(tensor.clone()), TensorRef(tensor))
     }
+    /// get the value / recompute and get the value
     pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
         self.recompute().into()
     }

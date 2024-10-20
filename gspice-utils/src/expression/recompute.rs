@@ -96,13 +96,13 @@ impl BinaryOp {
             (RecomputeScalarTensor::Scalar(lhs_v), RecomputeScalarTensor::TensorChanged(rhs_v)) => {
                 RecomputeScalarTensor::change(
                     tensor,
-                    rhs_v.broadcast_iter_binary_op(*lhs_v, self.op_fn_inverse()),
+                    rhs_v.broadcast_iter_binary_op(*lhs_v, self.fn_rhs_op_lhs()),
                 )
             }
             (RecomputeScalarTensor::TensorChanged(lhs_v), RecomputeScalarTensor::Scalar(rhs_v)) => {
                 RecomputeScalarTensor::change(
                     tensor,
-                    lhs_v.broadcast_iter_binary_op(*rhs_v, self.op_fn()),
+                    lhs_v.broadcast_iter_binary_op(*rhs_v, self.fn_lhs_op_rhs()),
                 )
             }
             (
@@ -116,7 +116,10 @@ impl BinaryOp {
             | (
                 RecomputeScalarTensor::TensorNoChange(lhs_v),
                 RecomputeScalarTensor::TensorChanged(rhs_v),
-            ) => RecomputeScalarTensor::change(tensor, lhs_v.iter_binary_op(rhs_v, self.op_fn())),
+            ) => RecomputeScalarTensor::change(
+                tensor,
+                lhs_v.iter_binary_op(rhs_v, self.fn_lhs_op_rhs()),
+            ),
         }
     }
 }
@@ -127,7 +130,7 @@ impl UnaryOp {
             RecomputeScalarTensor::Scalar(_) => unreachable!(),
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
             RecomputeScalarTensor::TensorChanged(node) => {
-                RecomputeScalarTensor::change(tensor, node.iter_unary_op(self.op_fn()))
+                RecomputeScalarTensor::change(tensor, node.iter_unary_op(self.fn_op()))
             }
         }
     }
@@ -143,7 +146,7 @@ impl Expression {
                 ChangeState::NeedSearch => match tensor.op() {
                     Op::Assgin => RecomputeScalarTensor::nochange(tensor),
                     Op::Powf(expression, _) => todo!(),
-                    Op::Cond(expression, cmp_op, expression1, expression2, expression3) => {
+                    Op::Cond(cond, when_true, when_false) => {
                         todo!()
                     }
                     Op::Cmp(expression, cmp_op) => todo!(),
