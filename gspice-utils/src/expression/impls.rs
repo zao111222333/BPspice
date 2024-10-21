@@ -1,5 +1,5 @@
 use super::{
-    op::{CmpOp, CmpOpT, SmoothCmp, SmoothCmpLinear, SmoothCmpNone, SmoothCmpSigmoid, SmoothCmpT},
+    op::{CmpOp, CmpOpT, CmpMethod, CmpMethodLinear, CmpMethodDiscret, CmpMethodSigmoid, CmpMethodT},
     Expression, ScalarTensor, Tensor,
 };
 use core::fmt;
@@ -48,7 +48,7 @@ impl<'a> fmt::Display for ScalarTensor<'a> {
     }
 }
 
-pub(super) trait CmpIter: SmoothCmpT {
+pub(super) trait CmpIter: CmpMethodT {
     #[inline]
     fn eq_forward_iter<'a>(&self, iter: impl Iterator<Item = (&'a f64, &'a f64)>) -> Vec<f64> {
         iter.map(|(lhs, rhs)| self.eq_forward(*lhs, *rhs)).collect()
@@ -423,116 +423,116 @@ pub(super) trait CmpIter: SmoothCmpT {
     }
 }
 
-impl CmpIter for SmoothCmpNone {}
-impl CmpIter for SmoothCmpLinear {}
-impl CmpIter for SmoothCmpSigmoid {}
+impl CmpIter for CmpMethodDiscret {}
+impl CmpIter for CmpMethodLinear {}
+impl CmpIter for CmpMethodSigmoid {}
 
-const SMOOTH_CMP_NONE: SmoothCmpNone = SmoothCmpNone;
+const CMP_METHOD_DISCRET: CmpMethodDiscret = CmpMethodDiscret;
 
 impl CmpOpT for super::op::Eq {
     const OP: CmpOp = CmpOp::Eq;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.eq_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.eq_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.eq_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.eq_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.eq_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.eq_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.eq_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.eq_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.eq_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.eq_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.eq_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.eq_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.eq_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.eq_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.eq_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.eq_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.eq_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.eq_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.eq_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.eq_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.eq_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.eq_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.eq_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.eq_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.eq_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.eq_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
@@ -541,107 +541,107 @@ impl CmpOpT for super::op::Eq {
 impl CmpOpT for super::op::Ne {
     const OP: CmpOp = CmpOp::Ne;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ne_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ne_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ne_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ne_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ne_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ne_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ne_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ne_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ne_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ne_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ne_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ne_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ne_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ne_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ne_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ne_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ne_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ne_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ne_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ne_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ne_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ne_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ne_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ne_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ne_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ne_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
@@ -650,107 +650,107 @@ impl CmpOpT for super::op::Ne {
 impl CmpOpT for super::op::Le {
     const OP: CmpOp = CmpOp::Le;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.le_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.le_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.le_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.le_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.le_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.le_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.le_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.le_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.le_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.le_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.le_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.le_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.le_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.le_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.le_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.le_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.le_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.le_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.le_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.le_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.le_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.le_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.le_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.le_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.le_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.le_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
@@ -759,107 +759,107 @@ impl CmpOpT for super::op::Le {
 impl CmpOpT for super::op::Ge {
     const OP: CmpOp = CmpOp::Ge;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ge_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ge_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ge_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ge_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ge_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ge_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ge_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ge_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ge_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ge_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ge_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ge_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ge_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ge_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ge_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ge_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ge_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ge_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ge_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ge_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ge_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.ge_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.ge_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.ge_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.ge_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.ge_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
@@ -868,107 +868,107 @@ impl CmpOpT for super::op::Ge {
 impl CmpOpT for super::op::Lt {
     const OP: CmpOp = CmpOp::Lt;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.lt_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.lt_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.lt_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.lt_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.lt_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.lt_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.lt_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.lt_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.lt_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.lt_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.lt_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.lt_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.lt_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.lt_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.lt_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.lt_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.lt_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.lt_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.lt_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.lt_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.lt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.lt_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.lt_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.lt_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.lt_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.lt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
@@ -977,107 +977,107 @@ impl CmpOpT for super::op::Lt {
 impl CmpOpT for super::op::Gt {
     const OP: CmpOp = CmpOp::Gt;
     #[inline]
-    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64 {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_forward(lhs, rhs),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.gt_forward(lhs, rhs),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.gt_forward(lhs, rhs),
+    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64 {
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_forward(lhs, rhs),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.gt_forward(lhs, rhs),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.gt_forward(lhs, rhs),
         }
     }
     #[inline]
     fn forward_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_forward_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.gt_forward_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.gt_forward_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_forward_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.gt_forward_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.gt_forward_iter(iter),
         }
     }
     #[inline]
     fn forward_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_forward_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.gt_forward_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_forward_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.gt_forward_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.gt_forward_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.gt_forward_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }
     #[inline]
     fn forward_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_forward_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.gt_forward_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_forward_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.gt_forward_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.gt_forward_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.gt_forward_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_lhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_backward_lhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.gt_backward_lhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.gt_backward_lhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_backward_lhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.gt_backward_lhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.gt_backward_lhs_iter(iter),
         }
     }
     #[inline]
     fn backward_lhs_iter_fix_rhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.gt_backward_lhs_iter_fix_rhs(rhs, lhs_iter)
             }
         }
     }
     #[inline]
     fn backward_rhs_iter<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_backward_rhs_iter(iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => smooth_cmp_linear.gt_backward_rhs_iter(iter),
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => smooth_cmp_sigmoid.gt_backward_rhs_iter(iter),
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_backward_rhs_iter(iter),
+            CmpMethod::Linear(cmp_method_linear) => cmp_method_linear.gt_backward_rhs_iter(iter),
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => cmp_method_sigmoid.gt_backward_rhs_iter(iter),
         }
     }
     #[inline]
     fn backward_rhs_iter_fix_lhs<'a>(
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
-        match smooth {
-            SmoothCmp::None => SMOOTH_CMP_NONE.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
-            SmoothCmp::Linear(smooth_cmp_linear) => {
-                smooth_cmp_linear.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+        match cmp_method {
+            CmpMethod::Discret => CMP_METHOD_DISCRET.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter),
+            CmpMethod::Linear(cmp_method_linear) => {
+                cmp_method_linear.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
-            SmoothCmp::Sigmoid(smooth_cmp_sigmoid) => {
-                smooth_cmp_sigmoid.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
+            CmpMethod::Sigmoid(cmp_method_sigmoid) => {
+                cmp_method_sigmoid.gt_backward_rhs_iter_fix_lhs(lhs, rhs_iter)
             }
         }
     }

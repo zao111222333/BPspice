@@ -7,7 +7,7 @@ use std::{
 use itertools::izip;
 
 use super::{
-    op::{BinaryOp, CmpOp, Cond, Powf, SmoothCmp, UnaryOp},
+    op::{BinaryOp, CmpOp, Cond, Powf, CmpMethod, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
 use core::{cmp::Ordering, fmt};
@@ -128,8 +128,8 @@ impl Expression {
                     Op::Binary(lhs, rhs, binary_op) => {
                         binary_op._backward(tensor, lhs, rhs, &mut grads, grad);
                     }
-                    Op::Cmp(lhs, rhs, cmp_op, smooth) => {
-                        cmp_op._backward(tensor, lhs, rhs, smooth, &mut grads, grad)
+                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => {
+                        cmp_op._backward(tensor, lhs, rhs, cmp_method, &mut grads, grad)
                     }
                 }
             }
@@ -381,7 +381,7 @@ impl CmpOp {
         tensor: &Tensor,
         lhs: &Expression,
         rhs: &Expression,
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         grads: &mut GradStore,
         grad: Grad,
     ) {
@@ -395,7 +395,7 @@ impl CmpOp {
             (Expression::Const(lhs_x), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
                     self.backward_rhs_iter_fix_lhs(
-                        smooth,
+                        cmp_method,
                         lhs_x,
                         izip!(
                             rhs_tensor.values().read().unwrap().iter(),
@@ -409,7 +409,7 @@ impl CmpOp {
             (Expression::Tensor(lhs_tensor), Expression::Const(rhs_x)) => {
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
                     self.backward_lhs_iter_fix_rhs(
-                        smooth,
+                        cmp_method,
                         rhs_x,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
@@ -423,7 +423,7 @@ impl CmpOp {
             (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
                     self.backward_rhs_iter(
-                        smooth,
+                        cmp_method,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
                             rhs_tensor.values().read().unwrap().iter(),
@@ -435,7 +435,7 @@ impl CmpOp {
                 }
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
                     self.backward_lhs_iter(
-                        smooth,
+                        cmp_method,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
                             rhs_tensor.values().read().unwrap().iter(),

@@ -4,7 +4,7 @@ use itertools::izip;
 use num_traits::Zero;
 
 use super::{
-    op::{BinaryOp, CmpOp, Cond, Powf, SmoothCmp, UnaryOp},
+    op::{BinaryOp, CmpOp, Cond, Powf, CmpMethod, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
 
@@ -23,7 +23,7 @@ impl Expression {
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
-                    Op::Cmp(lhs, rhs, cmp_op, smooth) => cmp_op.recompute(lhs, rhs, smooth, tensor),
+                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => cmp_op.recompute(lhs, rhs, cmp_method, tensor),
                 },
             },
         }
@@ -145,7 +145,7 @@ impl CmpOp {
         &self,
         lhs: &Expression,
         rhs: &Expression,
-        smooth: &SmoothCmp,
+        cmp_method: &CmpMethod,
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
         match (lhs.recompute(), rhs.recompute()) {
@@ -162,7 +162,7 @@ impl CmpOp {
             ) => RecomputeScalarTensor::change(
                 tensor,
                 self.forward_iter_fix_lhs(
-                    smooth,
+                    cmp_method,
                     *lhs_x,
                     rhs_tensor.values().read().unwrap().iter(),
                 ),
@@ -173,7 +173,7 @@ impl CmpOp {
             ) => RecomputeScalarTensor::change(
                 tensor,
                 self.forward_iter_fix_rhs(
-                    smooth,
+                    cmp_method,
                     *rhs_x,
                     lhs_tensor.values().read().unwrap().iter(),
                 ),
@@ -192,7 +192,7 @@ impl CmpOp {
             ) => RecomputeScalarTensor::change(
                 tensor,
                 self.forward_iter(
-                    smooth,
+                    cmp_method,
                     izip!(
                         lhs_tensor.values().read().unwrap().iter(),
                         rhs_tensor.values().read().unwrap().iter()
