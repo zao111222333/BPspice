@@ -4,8 +4,10 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering::Relaxed},
 };
 
+use itertools::izip;
+
 use super::{
-    op::{BinaryOp, Cond, Powf, UnaryOp},
+    op::{BinaryOp, CmpOp, Cond, Powf, SmoothCmp, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
 use core::{cmp::Ordering, fmt};
@@ -75,16 +77,20 @@ impl Expression {
                         already_seen.insert(*grad_id, &tensor);
                         match tensor.op() {
                             Op::Assgin => (),
-                            Op::Powf(expr, _) => walk(expr, already_seen),
+                            Op::Powf(node, _) => walk(node, already_seen),
                             Op::Cond(cond, on_true, on_false) => {
                                 walk(cond, already_seen);
                                 walk(on_true, already_seen);
                                 walk(on_false, already_seen);
                             }
-                            Op::Unary(expr, _) => walk(expr, already_seen),
-                            Op::Binary(expr1, expr2, _) => {
-                                walk(expr1, already_seen);
-                                walk(expr2, already_seen);
+                            Op::Unary(node, _) => walk(node, already_seen),
+                            Op::Binary(lhs, rhs, _) => {
+                                walk(lhs, already_seen);
+                                walk(rhs, already_seen);
+                            }
+                            Op::Cmp(lhs, rhs, _, _) => {
+                                walk(lhs, already_seen);
+                                walk(rhs, already_seen);
                             }
                         }
                     }
@@ -112,15 +118,18 @@ impl Expression {
                     .expect("gspice internal error - grad not populated");
                 match tensor.op() {
                     Op::Assgin => unreachable!(),
-                    Op::Powf(node, n) => Powf::backward(*n, tensor, node, &mut grads, grad),
+                    Op::Powf(node, n) => Powf::_backward(*n, tensor, node, &mut grads, grad),
                     Op::Cond(cond, on_true, on_false) => {
-                        Cond::backward(cond, on_true, on_false, &mut grads, grad)
+                        Cond::_backward(cond, on_true, on_false, &mut grads, grad)
                     }
                     Op::Unary(node, unary_op) => {
-                        unary_op.backward(tensor, node, &mut grads, grad);
+                        unary_op._backward(tensor, node, &mut grads, grad);
                     }
                     Op::Binary(lhs, rhs, binary_op) => {
-                        binary_op.backward(tensor, lhs, rhs, &mut grads, grad);
+                        binary_op._backward(tensor, lhs, rhs, &mut grads, grad);
+                    }
+                    Op::Cmp(lhs, rhs, cmp_op, smooth) => {
+                        cmp_op._backward(tensor, lhs, rhs, smooth, &mut grads, grad)
                     }
                 }
             }
@@ -177,8 +186,8 @@ impl GradStore {
 }
 
 impl UnaryOp {
-    fn backward(&self, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
-        let fn_backward = self.fn_backward();
+    fn _backward(&self, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
+        let backward = self.backward();
         match node {
             Expression::Const(_) => unreachable!(),
             Expression::Tensor(node_tensor) => {
@@ -189,7 +198,7 @@ impl UnaryOp {
                         node_tensor.values().read().unwrap().iter(),
                         grad.iter(),
                     ) {
-                        fn_backward(x, res, grad, sum_grad);
+                        backward(x, res, grad, sum_grad);
                     }
                 }
             }
@@ -198,7 +207,7 @@ impl UnaryOp {
 }
 
 impl Powf {
-    fn backward(n: f64, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
+    fn _backward(n: f64, tensor: &Tensor, node: &Expression, grads: &mut GradStore, grad: Grad) {
         match node {
             Expression::Const(_) => unreachable!(),
             Expression::Tensor(node_tensor) => {
@@ -209,7 +218,7 @@ impl Powf {
                         node_tensor.values().read().unwrap().iter(),
                         grad.iter(),
                     ) {
-                        Self::fn_backward(x, n, res, grad, sum_grad);
+                        Self::backward(x, n, res, grad, sum_grad);
                     }
                 }
             }
@@ -219,7 +228,7 @@ impl Powf {
 
 impl Cond {
     #[rustfmt::skip]
-    fn backward(
+    fn _backward(
         cond: &Expression,
         on_true: &Expression,
         on_false: &Expression,
@@ -235,7 +244,7 @@ impl Cond {
                         grad.iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                        Self::backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
                     }
                 }
             },
@@ -246,7 +255,7 @@ impl Cond {
                         grad.iter(),
                         on_true_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                        Self::backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
                     }
                 }
             },
@@ -258,7 +267,7 @@ impl Cond {
                         on_true_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                        Self::backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
                     }
                 }
                 if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
@@ -268,7 +277,7 @@ impl Cond {
                         on_true_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                        Self::backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
                     }
                 }
             },
@@ -279,7 +288,7 @@ impl Cond {
                         grad.iter(),
                         cond_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                        Self::backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
                     }
                 }
             },
@@ -291,7 +300,7 @@ impl Cond {
                         cond_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                        Self::backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
                     }
                 }
                 if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
@@ -301,7 +310,7 @@ impl Cond {
                         cond_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                        Self::backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
                     }
                 }
             },
@@ -313,7 +322,7 @@ impl Cond {
                         cond_tensor.values().read().unwrap().iter(),
                         on_true_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                        Self::backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
                     }
                 }
                 if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
@@ -323,7 +332,7 @@ impl Cond {
                         cond_tensor.values().read().unwrap().iter(),
                         on_true_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                        Self::backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
                     }
                 }
             },
@@ -336,7 +345,7 @@ impl Cond {
                         on_true_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                        Self::backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
                     }
                 }
                 if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
@@ -347,7 +356,7 @@ impl Cond {
                         on_true_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                        Self::backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
                     }
                 }
                 if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
@@ -358,7 +367,7 @@ impl Cond {
                         on_true_tensor.values().read().unwrap().iter(),
                         on_false_tensor.values().read().unwrap().iter(),
                     ) {
-                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                        Self::backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
                     }
                 }
             },
@@ -366,8 +375,83 @@ impl Cond {
     }
 }
 
+impl CmpOp {
+    fn _backward(
+        &self,
+        tensor: &Tensor,
+        lhs: &Expression,
+        rhs: &Expression,
+        smooth: &SmoothCmp,
+        grads: &mut GradStore,
+        grad: Grad,
+    ) {
+        // lhs: &f64,
+        // rhs: &f64,
+        // res: &f64,
+        // grad: &f64,
+        // rhs_sum_grad: &mut f64,
+        match (lhs, rhs) {
+            (Expression::Const(_), Expression::Const(_)) => unreachable!(),
+            (Expression::Const(lhs_x), Expression::Tensor(rhs_tensor)) => {
+                if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
+                    self.backward_rhs_iter_fix_lhs(
+                        smooth,
+                        lhs_x,
+                        izip!(
+                            rhs_tensor.values().read().unwrap().iter(),
+                            tensor.values().read().unwrap().iter(),
+                            grad.iter(),
+                            rhs_sum_grad.iter_mut(),
+                        ),
+                    );
+                }
+            }
+            (Expression::Tensor(lhs_tensor), Expression::Const(rhs_x)) => {
+                if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
+                    self.backward_lhs_iter_fix_rhs(
+                        smooth,
+                        rhs_x,
+                        izip!(
+                            lhs_tensor.values().read().unwrap().iter(),
+                            tensor.values().read().unwrap().iter(),
+                            grad.iter(),
+                            lhs_sum_grad.iter_mut(),
+                        ),
+                    );
+                }
+            }
+            (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
+                if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
+                    self.backward_rhs_iter(
+                        smooth,
+                        izip!(
+                            lhs_tensor.values().read().unwrap().iter(),
+                            rhs_tensor.values().read().unwrap().iter(),
+                            tensor.values().read().unwrap().iter(),
+                            grad.iter(),
+                            rhs_sum_grad.iter_mut(),
+                        ),
+                    );
+                }
+                if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
+                    self.backward_lhs_iter(
+                        smooth,
+                        izip!(
+                            lhs_tensor.values().read().unwrap().iter(),
+                            rhs_tensor.values().read().unwrap().iter(),
+                            tensor.values().read().unwrap().iter(),
+                            grad.iter(),
+                            lhs_sum_grad.iter_mut(),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
 impl BinaryOp {
-    fn backward(
+    fn _backward(
         &self,
         tensor: &Tensor,
         lhs: &Expression,
@@ -375,7 +459,7 @@ impl BinaryOp {
         grads: &mut GradStore,
         grad: Grad,
     ) {
-        let [fn_backward_lhs, fn_backward_rhs] = self.fn_backward();
+        let [backward_lhs, backward_rhs] = self.backward();
         match (lhs, rhs) {
             (Expression::Const(_), Expression::Const(_)) => unreachable!(),
             (Expression::Const(lhs_x), Expression::Tensor(rhs_tensor)) => {
@@ -386,7 +470,7 @@ impl BinaryOp {
                         grad.iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_rhs(lhs_x, rhs_x, res, grad, rhs_grad);
+                        backward_rhs(lhs_x, rhs_x, res, grad, rhs_grad);
                     }
                 }
             }
@@ -398,7 +482,7 @@ impl BinaryOp {
                         grad.iter(),
                         lhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_lhs(lhs_x, rhs_x, res, grad, lhs_grad);
+                        backward_lhs(lhs_x, rhs_x, res, grad, lhs_grad);
                     }
                 }
             }
@@ -411,7 +495,7 @@ impl BinaryOp {
                         lhs_tensor.values().read().unwrap().iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_rhs(lhs_x, rhs_x, res, grad, rhs_grad);
+                        backward_rhs(lhs_x, rhs_x, res, grad, rhs_grad);
                     }
                 }
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
@@ -422,7 +506,7 @@ impl BinaryOp {
                         lhs_tensor.values().read().unwrap().iter(),
                         rhs_tensor.values().read().unwrap().iter(),
                     ) {
-                        fn_backward_lhs(lhs_x, rhs_x, res, grad, lhs_grad);
+                        backward_lhs(lhs_x, rhs_x, res, grad, lhs_grad);
                     }
                 }
             }

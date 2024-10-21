@@ -4,8 +4,6 @@ mod op;
 mod recompute;
 mod test;
 
-use ordered_float::OrderedFloat;
-use rand::prelude::Distribution;
 pub use recompute::before_update;
 
 use autograd::GradId;

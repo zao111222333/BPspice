@@ -1,7 +1,7 @@
 use itertools::izip;
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use ordered_float::OrderedFloat;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Debug};
 
 use super::{Expression, GradId, Tensor};
 
@@ -17,6 +17,41 @@ pub enum Op {
     Cond(Expression, Expression, Expression),
     Unary(Expression, UnaryOp),
     Binary(Expression, Expression, BinaryOp),
+    Cmp(Expression, Expression, CmpOp, SmoothCmp),
+}
+
+/// SmoothCmp only activate in gradient mode
+#[derive(Clone, Copy, Debug)]
+pub enum SmoothCmp {
+    None,
+    /// `a > b`:
+    /// ``` text
+    ///          _____  1.0 :  a-b > 1/2k
+    ///         /
+    ///        /        0.5 :  a-b = 0
+    ///       /
+    /// _____/          0.0 :  a-b < -1/2k
+    /// ```
+    Linear(SmoothCmpLinear),
+    /// `a>b` <-> $S(a, b) = \sigma(k \cdot (a - b)) = \frac{1}{1 + e^{-k(a - b)}} $
+    Sigmoid(SmoothCmpSigmoid),
+}
+
+impl SmoothCmp {
+    fn differentiable(&self) -> bool {
+        match self {
+            SmoothCmp::None => SmoothCmpNone::DIFFERENTIABLE,
+            SmoothCmp::Linear(_) => SmoothCmpLinear::DIFFERENTIABLE,
+            SmoothCmp::Sigmoid(_) => SmoothCmpSigmoid::DIFFERENTIABLE,
+        }
+    }
+}
+
+macro_rules! assert_logic {
+    ($logic:expr) => {
+        debug_assert!(OrderedFloat($logic).ge(&OrderedFloat(0.0)));
+        debug_assert!(OrderedFloat($logic).le(&OrderedFloat(1.0)));
+    };
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -25,10 +60,10 @@ pub enum Op {
 
 pub(super) struct Powf;
 impl Powf {
-    pub(super) fn fn_forward(x: f64, n: f64) -> f64 {
+    pub(super) fn forward(x: f64, n: f64) -> f64 {
         x.powf(n)
     }
-    pub(super) fn fn_backward(x: &f64, n: f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    pub(super) fn backward(x: &f64, n: f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * n * x.powf(n - 1.0);
     }
 }
@@ -36,10 +71,10 @@ impl Expression {
     #[inline]
     pub fn powf(&self, n: f64) -> Self {
         match self {
-            Self::Const(x) => Self::Const(Powf::fn_forward(*x, n)),
+            Self::Const(x) => Self::Const(Powf::forward(*x, n)),
             Self::Tensor(tensor) => Self::Tensor(tensor.broadcast_binary_op(
                 n,
-                Powf::fn_forward,
+                Powf::forward,
                 Op::Powf(Self::Tensor(tensor.clone()), n),
             )),
         }
@@ -56,13 +91,12 @@ impl Cond {
     ///
     /// smoothing method:
     /// `cond*on_true + (1-cond)*on_false`
-    pub(super) fn fn_forward(cond: &f64, on_true: f64, on_false: f64) -> f64 {
-        debug_assert!(OrderedFloat(*cond).ge(&OrderedFloat(0.0)));
-        debug_assert!(OrderedFloat(*cond).le(&OrderedFloat(1.0)));
-        cond * on_true + (f64::one() - cond) * on_false
+    pub(super) fn forward(cond: &f64, on_true: f64, on_false: f64) -> f64 {
+        assert_logic!(*cond);
+        cond * on_true + (1.0 - cond) * on_false
     }
     /// $\frac{\partial L}{\partial a} = \frac{\partial L}{\partial e} \cdot \frac{\partial e}{\partial a} = \text{grad\_output} \times (b - c)$
-    pub(super) fn fn_backward_cond(
+    pub(super) fn backward_cond(
         _cond: &f64,
         on_true: &f64,
         on_false: &f64,
@@ -71,7 +105,7 @@ impl Cond {
     ) {
         *cond_grad += grad * (on_true - on_false);
     }
-    pub(super) fn fn_backward_on_true(
+    pub(super) fn backward_on_true(
         cond: &f64,
         _on_true: &f64,
         _on_false: &f64,
@@ -80,15 +114,14 @@ impl Cond {
     ) {
         *on_true_grad += cond * grad;
     }
-    pub(super) fn fn_backward_on_false(
+    pub(super) fn backward_on_false(
         cond: &f64,
         _on_true: &f64,
         _on_false: &f64,
         grad: &f64,
         on_false_grad: &mut f64,
     ) {
-        use num_traits::One;
-        *on_false_grad += (f64::one() - cond) * grad;
+        *on_false_grad += (1.0 - cond) * grad;
     }
 }
 impl Cond {
@@ -102,7 +135,7 @@ impl Cond {
             .read()
             .unwrap()
             .iter()
-            .map(|cond_x| Cond::fn_forward(cond_x, on_true_x, on_false_x))
+            .map(|cond_x| Cond::forward(cond_x, on_true_x, on_false_x))
             .collect()
     }
     pub(super) fn iter_tensor_x_tensor(
@@ -114,7 +147,7 @@ impl Cond {
             cond_tensor.values().read().unwrap().iter(),
             on_false_tensor.values().read().unwrap().iter()
         )
-        .map(|(cond_x, on_false_x)| Cond::fn_forward(cond_x, on_true_x, *on_false_x))
+        .map(|(cond_x, on_false_x)| Cond::forward(cond_x, on_true_x, *on_false_x))
         .collect()
     }
     pub(super) fn iter_tensor_tensor_x(
@@ -126,7 +159,7 @@ impl Cond {
             cond_tensor.values().read().unwrap().iter(),
             on_true_tensor.values().read().unwrap().iter(),
         )
-        .map(|(cond_x, on_true_x)| Cond::fn_forward(cond_x, *on_true_x, on_false_x))
+        .map(|(cond_x, on_true_x)| Cond::forward(cond_x, *on_true_x, on_false_x))
         .collect()
     }
     pub(super) fn iter_tensor_tensor_tensor(
@@ -139,7 +172,7 @@ impl Cond {
             on_true_tensor.values().read().unwrap().iter(),
             on_false_tensor.values().read().unwrap().iter()
         )
-        .map(|(cond_x, on_true_x, on_false_x)| Cond::fn_forward(cond_x, *on_true_x, *on_false_x))
+        .map(|(cond_x, on_true_x, on_false_x)| Cond::forward(cond_x, *on_true_x, *on_false_x))
         .collect()
     }
 }
@@ -149,7 +182,7 @@ impl Expression {
     pub fn cond(&self, on_true: &Self, on_false: &Self) -> Self {
         match (self, on_true, on_false) {
             (Self::Const(cond_x), Self::Const(on_true_x), Self::Const(on_false_x)) => {
-                Self::Const(Cond::fn_forward(cond_x, *on_true_x, *on_false_x))
+                Self::Const(Cond::forward(cond_x, *on_true_x, *on_false_x))
             }
             (Self::Const(cond_x), Self::Const(on_true_x), Self::Tensor(on_false_tensor)) => {
                 if cond_x.is_zero() {
@@ -246,6 +279,7 @@ impl Expression {
 ////////////////////////////////////////////////////////////////////////////////////////////
 #[derive(Clone, Copy, Debug)]
 pub enum UnaryOp {
+    LogicNot,
     Neg,
     Sin,
     Cos,
@@ -266,19 +300,19 @@ pub enum UnaryOp {
 
 trait UnaryOpT {
     const OP: UnaryOp;
-    fn fn_forward(x: f64) -> f64;
-    fn fn_backward(x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64);
+    fn forward(x: f64) -> f64;
+    fn backward(x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64);
 }
 
 struct Neg;
 impl UnaryOpT for Neg {
     const OP: UnaryOp = UnaryOp::Neg;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         -x
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(_x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad -= grad;
     }
 }
@@ -295,11 +329,11 @@ struct Sin;
 impl UnaryOpT for Sin {
     const OP: UnaryOp = UnaryOp::Sin;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.sin()
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * x.cos();
     }
 }
@@ -307,11 +341,11 @@ struct Cos;
 impl UnaryOpT for Cos {
     const OP: UnaryOp = UnaryOp::Cos;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.cos()
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad -= grad * x.sin();
     }
 }
@@ -319,12 +353,12 @@ struct Tanh;
 impl UnaryOpT for Tanh {
     const OP: UnaryOp = UnaryOp::Tanh;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.tanh()
     }
     // $\frac{\partial f}{\partial x} = \frac{\partial f}{\partial c} \cdot \frac{\partial c}{\partial x} = \frac{\partial f}{\partial c} \cdot (1 - \tanh^2(x))$
     #[inline]
-    fn fn_backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
         let minus_dtanh = res * res - 1.;
         *sum_grad -= grad * minus_dtanh;
     }
@@ -333,12 +367,12 @@ struct Tan;
 impl UnaryOpT for Tan {
     const OP: UnaryOp = UnaryOp::Tan;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.tan()
     }
     /// $\frac{\partial f}{\partial x} = \frac{\partial f}{\partial c} \cdot \frac{\partial c}{\partial x} = \frac{\partial f}{\partial c} \cdot (1 + \tan^2(x))$
     #[inline]
-    fn fn_backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
         let dtan = res * res + 1.;
         *sum_grad -= grad * dtan;
     }
@@ -347,12 +381,12 @@ struct Ceil;
 impl UnaryOpT for Ceil {
     const OP: UnaryOp = UnaryOp::Ceil;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.ceil()
     }
     // FIXME: No gradient for compare
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
+    fn backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Ceil");
         // *sum_grad += grad;
     }
@@ -361,11 +395,11 @@ struct Floor;
 impl UnaryOpT for Floor {
     const OP: UnaryOp = UnaryOp::Floor;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.floor()
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
+    fn backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Floor");
         // *sum_grad += grad;
     }
@@ -375,11 +409,11 @@ struct Round;
 impl UnaryOpT for Round {
     const OP: UnaryOp = UnaryOp::Round;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.round()
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
+    fn backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Round");
         // *sum_grad += grad;
     }
@@ -388,11 +422,11 @@ struct Sign;
 impl UnaryOpT for Sign {
     const OP: UnaryOp = UnaryOp::Sign;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.signum()
     }
     #[inline]
-    fn fn_backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
+    fn backward(_x: &f64, _res: &f64, _grad: &f64, _sum_grad: &mut f64) {
         log::error!("BackwardNotSupported Sign");
         // let epsilon = 1e-10;
         // if (x.abs() - epsilon).is_sign_negative() {
@@ -404,11 +438,11 @@ struct Sqrt;
 impl UnaryOpT for Sqrt {
     const OP: UnaryOp = UnaryOp::Sqrt;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.sqrt()
     }
     #[inline]
-    fn fn_backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * 0.5 / res;
     }
 }
@@ -416,11 +450,11 @@ struct Sqr;
 impl UnaryOpT for Sqr {
     const OP: UnaryOp = UnaryOp::Sqr;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x * x
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * 2.0 * x;
     }
 }
@@ -428,11 +462,11 @@ struct Cubic;
 impl UnaryOpT for Cubic {
     const OP: UnaryOp = UnaryOp::Cubic;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x * x * x
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * 3.0 * x * x;
     }
 }
@@ -441,11 +475,11 @@ struct Log;
 impl UnaryOpT for Log {
     const OP: UnaryOp = UnaryOp::Log;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.ln()
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad / x;
     }
 }
@@ -453,11 +487,11 @@ struct Exp;
 impl UnaryOpT for Exp {
     const OP: UnaryOp = UnaryOp::Exp;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.exp()
     }
     #[inline]
-    fn fn_backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(_x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {
         *sum_grad += grad * res;
     }
 }
@@ -465,11 +499,11 @@ struct Abs;
 impl UnaryOpT for Abs {
     const OP: UnaryOp = UnaryOp::Abs;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         x.abs()
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         if x.is_sign_positive() {
             *sum_grad += grad;
         } else {
@@ -481,11 +515,27 @@ struct Erf;
 impl UnaryOpT for Erf {
     const OP: UnaryOp = UnaryOp::Erf;
     #[inline]
-    fn fn_forward(x: f64) -> f64 {
+    fn forward(x: f64) -> f64 {
         candle_core::cpu::erf::erf(x)
     }
     #[inline]
-    fn fn_backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
+        // d/dx erf(x) = 2/sqrt(pi) * e^(-x^2)
+        let erf_grad = (2. / std::f64::consts::PI.sqrt()) * (-x * x).exp();
+        *sum_grad += grad * erf_grad;
+    }
+}
+
+struct LogicNot;
+impl UnaryOpT for LogicNot {
+    const OP: UnaryOp = UnaryOp::LogicNot;
+    #[inline]
+    fn forward(x: f64) -> f64 {
+        assert_logic!(x);
+        1.0 - x
+    }
+    #[inline]
+    fn backward(x: &f64, _res: &f64, grad: &f64, sum_grad: &mut f64) {
         // d/dx erf(x) = 2/sqrt(pi) * e^(-x^2)
         let erf_grad = (2. / std::f64::consts::PI.sqrt()) * (-x * x).exp();
         *sum_grad += grad * erf_grad;
@@ -493,68 +543,70 @@ impl UnaryOpT for Erf {
 }
 
 impl UnaryOp {
-    pub(super) const fn fn_forward(&self) -> fn(f64) -> f64 {
+    pub(super) const fn forward(&self) -> fn(f64) -> f64 {
         match self {
-            Self::Neg => Neg::fn_forward,
-            Self::Sin => Sin::fn_forward,
-            Self::Cos => Cos::fn_forward,
-            Self::Tanh => Tanh::fn_forward,
-            Self::Tan => Tan::fn_forward,
-            Self::Ceil => Ceil::fn_forward,
-            Self::Floor => Floor::fn_forward,
-            Self::Round => Round::fn_forward,
-            Self::Sign => Sign::fn_forward,
-            Self::Sqrt => Sqrt::fn_forward,
-            Self::Sqr => Sqr::fn_forward,
-            Self::Cubic => Cubic::fn_forward,
-            Self::Log => Log::fn_forward,
-            Self::Exp => Exp::fn_forward,
-            Self::Abs => Abs::fn_forward,
-            Self::Erf => Erf::fn_forward,
+            Self::Neg => Neg::forward,
+            Self::Sin => Sin::forward,
+            Self::Cos => Cos::forward,
+            Self::Tanh => Tanh::forward,
+            Self::Tan => Tan::forward,
+            Self::Ceil => Ceil::forward,
+            Self::Floor => Floor::forward,
+            Self::Round => Round::forward,
+            Self::Sign => Sign::forward,
+            Self::Sqrt => Sqrt::forward,
+            Self::Sqr => Sqr::forward,
+            Self::Cubic => Cubic::forward,
+            Self::Log => Log::forward,
+            Self::Exp => Exp::forward,
+            Self::Abs => Abs::forward,
+            Self::Erf => Erf::forward,
+            Self::LogicNot => LogicNot::forward,
         }
     }
     #[inline]
-    pub(super) const fn fn_backward(&self) -> fn(&f64, &f64, &f64, &mut f64) {
+    pub(super) const fn backward(&self) -> fn(&f64, &f64, &f64, &mut f64) {
         match self {
-            Self::Neg => Neg::fn_backward,
-            Self::Sin => Sin::fn_backward,
-            Self::Cos => Cos::fn_backward,
-            Self::Tanh => Tanh::fn_backward,
-            Self::Tan => Tan::fn_backward,
-            Self::Ceil => Ceil::fn_backward,
-            Self::Floor => Floor::fn_backward,
-            Self::Round => Round::fn_backward,
-            Self::Sign => Sign::fn_backward,
-            Self::Sqrt => Sqrt::fn_backward,
-            Self::Sqr => Sqr::fn_backward,
-            Self::Cubic => Cubic::fn_backward,
-            Self::Log => Log::fn_backward,
-            Self::Exp => Exp::fn_backward,
-            Self::Abs => Abs::fn_backward,
-            Self::Erf => Erf::fn_backward,
+            Self::Neg => Neg::backward,
+            Self::Sin => Sin::backward,
+            Self::Cos => Cos::backward,
+            Self::Tanh => Tanh::backward,
+            Self::Tan => Tan::backward,
+            Self::Ceil => Ceil::backward,
+            Self::Floor => Floor::backward,
+            Self::Round => Round::backward,
+            Self::Sign => Sign::backward,
+            Self::Sqrt => Sqrt::backward,
+            Self::Sqr => Sqr::backward,
+            Self::Cubic => Cubic::backward,
+            Self::Log => Log::backward,
+            Self::Exp => Exp::backward,
+            Self::Abs => Abs::backward,
+            Self::Erf => Erf::backward,
+            Self::LogicNot => LogicNot::backward,
         }
     }
 }
 
 impl Tensor {
     #[inline]
-    pub(super) fn iter_unary_op(&self, fn_forward: fn(f64) -> f64) -> Vec<f64> {
+    pub(super) fn iter_unary_op(&self, forward: fn(f64) -> f64) -> Vec<f64> {
         self.values()
             .read()
             .unwrap()
             .iter()
-            .map(|x| fn_forward(*x))
+            .map(|x| forward(*x))
             .collect()
     }
     #[inline]
-    pub(super) fn unary_op(&self, fn_forward: fn(f64) -> f64, op: Op) -> Self {
+    pub(super) fn unary_op(&self, forward: fn(f64) -> f64, op: Op) -> Self {
         Self::new(
             if self.with_grad() {
                 Some(GradId::new())
             } else {
                 None
             },
-            self.iter_unary_op(fn_forward),
+            self.iter_unary_op(forward),
             op,
         )
     }
@@ -622,13 +674,542 @@ impl Expression {
         Expression::unary_op::<Erf>(&self)
     }
     #[inline]
+    pub fn logic_not(&self) -> Self {
+        Expression::unary_op::<LogicNot>(&self)
+    }
+    #[inline]
     fn unary_op<T: UnaryOpT>(&self) -> Self {
         match self {
-            Expression::Const(x) => Expression::Const(T::fn_forward(*x)),
-            Expression::Tensor(tensor) => Expression::Tensor(tensor.unary_op(
-                T::fn_forward,
-                Op::Unary(Self::Tensor(tensor.clone()), T::OP),
-            )),
+            Expression::Const(x) => Expression::Const(T::forward(*x)),
+            Expression::Tensor(tensor) => Expression::Tensor(
+                tensor.unary_op(T::forward, Op::Unary(Self::Tensor(tensor.clone()), T::OP)),
+            ),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////   CmpOp   //////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Le,
+    Ge,
+    Lt,
+    Gt,
+}
+
+impl CmpOp {
+    #[inline]
+    pub(super) fn forward_iter<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64)>,
+    ) -> Vec<f64> {
+        match self {
+            CmpOp::Eq => Eq::forward_iter(smooth, iter),
+            CmpOp::Ne => Ne::forward_iter(smooth, iter),
+            CmpOp::Le => Le::forward_iter(smooth, iter),
+            CmpOp::Ge => Ge::forward_iter(smooth, iter),
+            CmpOp::Lt => Lt::forward_iter(smooth, iter),
+            CmpOp::Gt => Gt::forward_iter(smooth, iter),
+        }
+    }
+    #[inline]
+    pub(super) fn forward_iter_fix_lhs<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        lhs: f64,
+        rhs_iter: impl Iterator<Item = &'a f64>,
+    ) -> Vec<f64> {
+        match self {
+            CmpOp::Eq => Eq::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Ne => Ne::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Le => Le::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Ge => Ge::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Lt => Lt::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Gt => Gt::forward_iter_fix_lhs(smooth, lhs, rhs_iter),
+        }
+    }
+    #[inline]
+    pub(super) fn forward_iter_fix_rhs<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        rhs: f64,
+        lhs_iter: impl Iterator<Item = &'a f64>,
+    ) -> Vec<f64> {
+        match self {
+            CmpOp::Eq => Eq::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Ne => Ne::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Le => Le::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Ge => Ge::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Lt => Lt::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Gt => Gt::forward_iter_fix_rhs(smooth, rhs, lhs_iter),
+        }
+    }
+    #[inline]
+    pub(super) fn backward_lhs_iter<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    ) {
+        match self {
+            CmpOp::Eq => Eq::backward_lhs_iter(smooth, iter),
+            CmpOp::Ne => Ne::backward_lhs_iter(smooth, iter),
+            CmpOp::Le => Le::backward_lhs_iter(smooth, iter),
+            CmpOp::Ge => Ge::backward_lhs_iter(smooth, iter),
+            CmpOp::Lt => Lt::backward_lhs_iter(smooth, iter),
+            CmpOp::Gt => Gt::backward_lhs_iter(smooth, iter),
+        }
+    }
+    #[inline]
+    pub(super) fn backward_rhs_iter<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    ) {
+        match self {
+            CmpOp::Eq => Eq::backward_rhs_iter(smooth, iter),
+            CmpOp::Ne => Ne::backward_rhs_iter(smooth, iter),
+            CmpOp::Le => Le::backward_rhs_iter(smooth, iter),
+            CmpOp::Ge => Ge::backward_rhs_iter(smooth, iter),
+            CmpOp::Lt => Lt::backward_rhs_iter(smooth, iter),
+            CmpOp::Gt => Gt::backward_rhs_iter(smooth, iter),
+        }
+    }
+    #[inline]
+    pub(super) fn backward_lhs_iter_fix_rhs<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        rhs: &f64,
+        lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    ) {
+        match self {
+            CmpOp::Eq => Eq::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Ne => Ne::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Le => Le::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Ge => Ge::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Lt => Lt::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+            CmpOp::Gt => Gt::backward_lhs_iter_fix_rhs(smooth, rhs, lhs_iter),
+        }
+    }
+    #[inline]
+    pub(super) fn backward_rhs_iter_fix_lhs<'a>(
+        &self,
+        smooth: &SmoothCmp,
+        lhs: &f64,
+        rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    ) {
+        match self {
+            CmpOp::Eq => Eq::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Ne => Ne::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Le => Le::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Ge => Ge::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Lt => Lt::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+            CmpOp::Gt => Gt::backward_rhs_iter_fix_lhs(smooth, lhs, rhs_iter),
+        }
+    }
+}
+
+pub(super) trait SmoothCmpT: Debug + Clone {
+    const DIFFERENTIABLE: bool;
+    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+
+    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+
+    fn le_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn le_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn le_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+
+    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+
+    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+
+    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64;
+    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SmoothCmpNone;
+impl SmoothCmpT for SmoothCmpNone {
+    const DIFFERENTIABLE: bool = false;
+    #[inline]
+    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).eq(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn eq_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn eq_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).ne(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn ne_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn ne_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).le(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn le_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn le_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).ge(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn ge_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn ge_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).lt(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn lt_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn lt_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        if OrderedFloat(lhs).gt(&OrderedFloat(rhs)){1.0}else{0.0}
+    }
+    #[inline]
+    fn gt_backward_lhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {
+    }
+    #[inline]
+    fn gt_backward_rhs(&self, _lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SmoothCmpLinear {
+    k: f64,
+    one_over_2k: f64,
+}
+impl SmoothCmpT for SmoothCmpLinear {
+    const DIFFERENTIABLE: bool = true;
+    #[inline]
+    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn le_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn le_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct SmoothCmpSigmoid {
+    k: f64,
+}
+impl SmoothCmpT for SmoothCmpSigmoid {
+    const DIFFERENTIABLE: bool = true;
+    #[inline]
+    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn le_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn le_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
+        todo!()
+    }
+    #[inline]
+    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        todo!()
+    }
+    #[inline]
+    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        todo!()
+    }
+}
+
+pub(crate) trait CmpOpT {
+    const OP: CmpOp;
+    fn forward(smooth: &SmoothCmp, lhs: f64, rhs: f64) -> f64;
+    fn forward_iter<'a>(
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64)>,
+    ) -> Vec<f64>;
+    fn forward_iter_fix_lhs<'a>(
+        smooth: &SmoothCmp,
+        lhs: f64,
+        rhs_iter: impl Iterator<Item = &'a f64>,
+    ) -> Vec<f64>;
+    fn forward_iter_fix_rhs<'a>(
+        smooth: &SmoothCmp,
+        rhs: f64,
+        lhs_iter: impl Iterator<Item = &'a f64>,
+    ) -> Vec<f64>;
+    fn backward_lhs_iter<'a>(
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    );
+    fn backward_lhs_iter_fix_rhs<'a>(
+        smooth: &SmoothCmp,
+        rhs: &f64,
+        lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    );
+    fn backward_rhs_iter<'a>(
+        smooth: &SmoothCmp,
+        iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    );
+    fn backward_rhs_iter_fix_lhs<'a>(
+        smooth: &SmoothCmp,
+        lhs: &f64,
+        rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
+    );
+}
+
+pub(super) struct Eq;
+pub(super) struct Ne;
+pub(super) struct Le;
+pub(super) struct Ge;
+pub(super) struct Lt;
+pub(super) struct Gt;
+
+impl Expression {
+    #[inline]
+    pub fn eq(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Eq>(rhs, SmoothCmp::None)
+    }
+    #[inline]
+    pub fn ne(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Ne>(rhs, SmoothCmp::None)
+    }
+    #[inline]
+    pub fn le(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Le>(rhs, SmoothCmp::None)
+    }
+    #[inline]
+    pub fn ge(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Ge>(rhs, SmoothCmp::None)
+    }
+    #[inline]
+    pub fn lt(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Lt>(rhs, SmoothCmp::None)
+    }
+    #[inline]
+    pub fn gt(&self, rhs: &Self) -> Self {
+        self.cmp_op::<Gt>(rhs, SmoothCmp::None)
+    }
+    /// SmoothCmp only activate in gradient mode
+    #[inline]
+    fn cmp_op<T: CmpOpT>(&self, rhs: &Self, smooth: SmoothCmp) -> Self {
+        match (self, rhs) {
+            (Self::Const(lhs_x), Self::Const(rhs_x)) => {
+                Self::Const(T::forward(&SmoothCmp::None, *lhs_x, *rhs_x))
+            }
+            (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
+                let (grad_id, smooth) = if smooth.differentiable() && rhs_tensor.with_grad() {
+                    (Some(GradId::new()), smooth)
+                } else {
+                    (None, SmoothCmp::None)
+                };
+                Self::Tensor(Tensor::new(
+                    grad_id,
+                    T::forward_iter_fix_lhs(
+                        &smooth,
+                        *lhs_x,
+                        rhs_tensor.values().read().unwrap().iter(),
+                    ),
+                    Op::Cmp(
+                        Self::Const(*lhs_x),
+                        Self::Tensor(rhs_tensor.clone()),
+                        T::OP,
+                        smooth,
+                    ),
+                ))
+            }
+            (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
+                let (grad_id, smooth) = if smooth.differentiable() && lhs_tensor.with_grad() {
+                    (Some(GradId::new()), smooth)
+                } else {
+                    (None, SmoothCmp::None)
+                };
+                Self::Tensor(Tensor::new(
+                    grad_id,
+                    T::forward_iter_fix_rhs(
+                        &smooth,
+                        *rhs_x,
+                        lhs_tensor.values().read().unwrap().iter(),
+                    ),
+                    Op::Cmp(
+                        Self::Tensor(lhs_tensor.clone()),
+                        Self::Const(*rhs_x),
+                        T::OP,
+                        smooth,
+                    ),
+                ))
+            }
+            (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
+                let (grad_id, smooth) = if smooth.differentiable()
+                    && (lhs_tensor.with_grad() || rhs_tensor.with_grad())
+                {
+                    (Some(GradId::new()), smooth)
+                } else {
+                    (None, SmoothCmp::None)
+                };
+                Self::Tensor(Tensor::new(
+                    grad_id,
+                    T::forward_iter(
+                        &smooth,
+                        izip!(
+                            lhs_tensor.values().read().unwrap().iter(),
+                            rhs_tensor.values().read().unwrap().iter()
+                        ),
+                    ),
+                    Op::Cmp(
+                        Self::Tensor(lhs_tensor.clone()),
+                        Self::Tensor(rhs_tensor.clone()),
+                        T::OP,
+                        smooth,
+                    ),
+                ))
+            }
         }
     }
 }
@@ -646,195 +1227,86 @@ pub enum BinaryOp {
     Pow,
     Min,
     Max,
-    Cmp(CmpOp),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum CmpOp {
-    Eq,
-    Ne,
-    Le,
-    Ge,
-    Lt,
-    Gt,
+    LogicAnd,
+    LogicOr,
 }
 
 trait BinaryOpT {
     const OP: BinaryOp;
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64;
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64;
-    fn fn_backward_lhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
-    fn fn_backward_rhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64;
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64;
+    fn backward_lhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn backward_rhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
 }
 
-struct Eq;
-impl BinaryOpT for Eq {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Eq);
+struct LogicAnd;
+impl BinaryOpT for LogicAnd {
+    const OP: BinaryOp = BinaryOp::LogicAnd;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).eq(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+        assert_logic!(lhs);
+        assert_logic!(rhs);
+        lhs * rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).eq(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+        assert_logic!(lhs);
+        assert_logic!(rhs);
+        lhs * rhs
     }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
+    #[inline]
+    fn backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        *lhs_sum_grad += grad * rhs;
+    }
+    #[inline]
+    fn backward_rhs(lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        *rhs_sum_grad += grad * lhs;
+    }
 }
-struct Ne;
-impl BinaryOpT for Ne {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Ne);
+
+/// or(a,b) = a+b - a * b
+struct LogicOr;
+impl BinaryOpT for LogicOr {
+    const OP: BinaryOp = BinaryOp::LogicOr;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).ne(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+        assert_logic!(lhs);
+        assert_logic!(rhs);
+        lhs + rhs - lhs * rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).ne(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
-}
-struct Le;
-impl BinaryOpT for Le {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Le);
-    #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).le(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+        assert_logic!(lhs);
+        assert_logic!(rhs);
+        lhs + rhs - lhs * rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).le(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
-}
-struct Ge;
-impl BinaryOpT for Ge {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Ge);
-    #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).ge(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        *lhs_sum_grad += grad * (1.0 - rhs);
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).ge(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
+    fn backward_rhs(lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        *rhs_sum_grad += grad * (1.0 - lhs);
     }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
-}
-struct Lt;
-impl BinaryOpT for Lt {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Lt);
-    #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).lt(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).lt(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
-}
-struct Gt;
-impl BinaryOpT for Gt {
-    const OP: BinaryOp = BinaryOp::Cmp(CmpOp::Gt);
-    #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).gt(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
-        use num_traits::identities::{One, Zero};
-        if OrderedFloat(lhs).gt(&OrderedFloat(rhs)) {
-            f64::one()
-        } else {
-            f64::zero()
-        }
-    }
-    // FIXME: No gradient for compare
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _lhs_sum_grad: &mut f64) {}
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, _grad: &f64, _rhs_sum_grad: &mut f64) {}
 }
 
 struct Add;
 impl BinaryOpT for Add {
     const OP: BinaryOp = BinaryOp::Add;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs + rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs + rhs
     }
     #[inline]
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         *lhs_sum_grad += grad;
     }
     #[inline]
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         *rhs_sum_grad += grad;
     }
 }
@@ -850,19 +1322,19 @@ struct Sub;
 impl BinaryOpT for Sub {
     const OP: BinaryOp = BinaryOp::Sub;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs - rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs - rhs
     }
     #[inline]
-    fn fn_backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         *lhs_sum_grad += grad;
     }
     #[inline]
-    fn fn_backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(_lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         *rhs_sum_grad -= grad;
     }
 }
@@ -878,19 +1350,19 @@ struct Mul;
 impl BinaryOpT for Mul {
     const OP: BinaryOp = BinaryOp::Mul;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs * rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs * rhs
     }
     #[inline]
-    fn fn_backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         *lhs_sum_grad += grad * rhs;
     }
     #[inline]
-    fn fn_backward_rhs(lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(lhs: &f64, _rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         *rhs_sum_grad += grad * lhs;
     }
 }
@@ -906,19 +1378,19 @@ struct Div;
 impl BinaryOpT for Div {
     const OP: BinaryOp = BinaryOp::Div;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs / rhs
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs / rhs
     }
     #[inline]
-    fn fn_backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(_lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         *lhs_sum_grad += grad / rhs;
     }
     #[inline]
-    fn fn_backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         *rhs_sum_grad -= grad * lhs / (rhs * rhs);
     }
 }
@@ -934,11 +1406,11 @@ struct Pow;
 impl BinaryOpT for Pow {
     const OP: BinaryOp = BinaryOp::Pow;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs.powf(rhs)
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs.powf(rhs)
     }
     /// $ c = a^b $
@@ -946,13 +1418,13 @@ impl BinaryOpT for Pow {
     /// $\frac{\partial f}{\partial a} = \frac{\partial f}{\partial c} \cdot \frac{\partial c}{\partial a} = \frac{\partial f}{\partial c} \cdot b \cdot a^{b - 1}$
     ///
     #[inline]
-    fn fn_backward_lhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         *lhs_sum_grad += grad * rhs * res / lhs;
         // *lhs_sum_grad += grad * rhs * lhs.powf(rhs - 1.0);
     }
     /// $\frac{\partial f}{\partial b} = \frac{\partial f}{\partial c} \cdot \frac{\partial c}{\partial b} = \frac{\partial f}{\partial c} \cdot c \cdot \ln(a)$
     #[inline]
-    fn fn_backward_rhs(lhs: &f64, _rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(lhs: &f64, _rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         *rhs_sum_grad += grad * res * (lhs.ln());
     }
 }
@@ -961,15 +1433,15 @@ struct Min;
 impl BinaryOpT for Min {
     const OP: BinaryOp = BinaryOp::Min;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs.min(rhs)
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs.min(rhs)
     }
     #[inline]
-    fn fn_backward_lhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         // If both masks are 1 one the same point, we want to scale the
         // gradient by 0.5 rather than 1.
         match OrderedFloat(*lhs).cmp(&OrderedFloat(*rhs)) {
@@ -979,7 +1451,7 @@ impl BinaryOpT for Min {
         }
     }
     #[inline]
-    fn fn_backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         // If both masks are 1 one the same point, we want to scale the
         // gradient by 0.5 rather than 1.
         match OrderedFloat(*rhs).cmp(&OrderedFloat(*lhs)) {
@@ -993,15 +1465,15 @@ struct Max;
 impl BinaryOpT for Max {
     const OP: BinaryOp = BinaryOp::Max;
     #[inline]
-    fn fn_forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
+    fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         lhs.max(rhs)
     }
     #[inline]
-    fn fn_forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
+    fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64 {
         lhs.max(rhs)
     }
     #[inline]
-    fn fn_backward_lhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+    fn backward_lhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         // If both masks are 1 one the same point, we want to scale the
         // gradient by 0.5 rather than 1.
         match OrderedFloat(*lhs).cmp(&OrderedFloat(*rhs)) {
@@ -1011,7 +1483,7 @@ impl BinaryOpT for Max {
         }
     }
     #[inline]
-    fn fn_backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+    fn backward_rhs(lhs: &f64, rhs: &f64, _res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         // If both masks are 1 one the same point, we want to scale the
         // gradient by 0.5 rather than 1.
         match OrderedFloat(*rhs).cmp(&OrderedFloat(*lhs)) {
@@ -1024,81 +1496,69 @@ impl BinaryOpT for Max {
 
 impl BinaryOp {
     #[inline]
-    pub(super) const fn fn_forward(&self) -> [fn(f64, f64) -> f64; 2] {
+    pub(super) const fn forward(&self) -> [fn(f64, f64) -> f64; 2] {
         match self {
-            Self::Add => [Add::fn_forward_lhs_rhs, Add::fn_forward_rhs_lhs],
-            Self::Sub => [Sub::fn_forward_lhs_rhs, Sub::fn_forward_rhs_lhs],
-            Self::Mul => [Mul::fn_forward_lhs_rhs, Mul::fn_forward_rhs_lhs],
-            Self::Div => [Div::fn_forward_lhs_rhs, Div::fn_forward_rhs_lhs],
-            Self::Pow => [Pow::fn_forward_lhs_rhs, Pow::fn_forward_rhs_lhs],
-            Self::Min => [Min::fn_forward_lhs_rhs, Min::fn_forward_rhs_lhs],
-            Self::Max => [Max::fn_forward_lhs_rhs, Max::fn_forward_rhs_lhs],
-            Self::Cmp(cmp_op) => match cmp_op {
-                CmpOp::Eq => [Eq::fn_forward_lhs_rhs, Eq::fn_forward_rhs_lhs],
-                CmpOp::Ne => [Ne::fn_forward_lhs_rhs, Ne::fn_forward_rhs_lhs],
-                CmpOp::Le => [Le::fn_forward_lhs_rhs, Le::fn_forward_rhs_lhs],
-                CmpOp::Ge => [Ge::fn_forward_lhs_rhs, Ge::fn_forward_rhs_lhs],
-                CmpOp::Lt => [Lt::fn_forward_lhs_rhs, Lt::fn_forward_rhs_lhs],
-                CmpOp::Gt => [Gt::fn_forward_lhs_rhs, Gt::fn_forward_rhs_lhs],
-            },
+            Self::Add => [Add::forward_lhs_rhs, Add::forward_rhs_lhs],
+            Self::Sub => [Sub::forward_lhs_rhs, Sub::forward_rhs_lhs],
+            Self::Mul => [Mul::forward_lhs_rhs, Mul::forward_rhs_lhs],
+            Self::Div => [Div::forward_lhs_rhs, Div::forward_rhs_lhs],
+            Self::Pow => [Pow::forward_lhs_rhs, Pow::forward_rhs_lhs],
+            Self::Min => [Min::forward_lhs_rhs, Min::forward_rhs_lhs],
+            Self::Max => [Max::forward_lhs_rhs, Max::forward_rhs_lhs],
+            Self::LogicAnd => todo!(),
+            Self::LogicOr => todo!(),
         }
     }
     #[inline]
-    pub(super) const fn fn_backward(&self) -> [fn(&f64, &f64, &f64, &f64, &mut f64); 2] {
+    pub(super) const fn backward(&self) -> [fn(&f64, &f64, &f64, &f64, &mut f64); 2] {
         match self {
-            Self::Add => [Add::fn_backward_lhs, Add::fn_backward_rhs],
-            Self::Sub => [Sub::fn_backward_lhs, Sub::fn_backward_rhs],
-            Self::Mul => [Mul::fn_backward_lhs, Mul::fn_backward_rhs],
-            Self::Div => [Div::fn_backward_lhs, Div::fn_backward_rhs],
-            Self::Pow => [Pow::fn_backward_lhs, Pow::fn_backward_rhs],
-            Self::Min => [Min::fn_backward_lhs, Min::fn_backward_rhs],
-            Self::Max => [Max::fn_backward_lhs, Max::fn_backward_rhs],
-            Self::Cmp(cmp_op) => match cmp_op {
-                CmpOp::Eq => [Eq::fn_backward_lhs, Eq::fn_backward_rhs],
-                CmpOp::Ne => [Ne::fn_backward_lhs, Ne::fn_backward_rhs],
-                CmpOp::Le => [Le::fn_backward_lhs, Le::fn_backward_rhs],
-                CmpOp::Ge => [Ge::fn_backward_lhs, Ge::fn_backward_rhs],
-                CmpOp::Lt => [Lt::fn_backward_lhs, Lt::fn_backward_rhs],
-                CmpOp::Gt => [Gt::fn_backward_lhs, Gt::fn_backward_rhs],
-            },
+            Self::Add => [Add::backward_lhs, Add::backward_rhs],
+            Self::Sub => [Sub::backward_lhs, Sub::backward_rhs],
+            Self::Mul => [Mul::backward_lhs, Mul::backward_rhs],
+            Self::Div => [Div::backward_lhs, Div::backward_rhs],
+            Self::Pow => [Pow::backward_lhs, Pow::backward_rhs],
+            Self::Min => [Min::backward_lhs, Min::backward_rhs],
+            Self::Max => [Max::backward_lhs, Max::backward_rhs],
+            Self::LogicAnd => todo!(),
+            Self::LogicOr => todo!(),
         }
     }
 }
 
 impl Tensor {
     #[inline]
-    pub(super) fn iter_binary_op(&self, rhs: &Self, fn_forward: fn(f64, f64) -> f64) -> Vec<f64> {
+    pub(super) fn iter_binary_op(&self, rhs: &Self, forward: fn(f64, f64) -> f64) -> Vec<f64> {
         let self_vec = self.values().read().unwrap();
         let rhs_vec = rhs.values().read().unwrap();
         assert_eq!(rhs_vec.len(), self_vec.len(), "tensor length mismatch!");
         self_vec
             .iter()
             .zip(rhs_vec.iter())
-            .map(|(v1, v2)| fn_forward(*v1, *v2))
+            .map(|(v1, v2)| forward(*v1, *v2))
             .collect()
     }
     #[inline]
     pub(super) fn broadcast_iter_binary_op(
         &self,
         rhs: f64,
-        fn_forward: fn(f64, f64) -> f64,
+        forward: fn(f64, f64) -> f64,
     ) -> Vec<f64> {
         self.values()
             .read()
             .unwrap()
             .iter()
-            .map(|v| fn_forward(*v, rhs))
+            .map(|v| forward(*v, rhs))
             .collect()
     }
     #[inline]
-    pub(super) fn binary_op(&self, rhs: &Self, fn_forward: fn(f64, f64) -> f64, op: Op) -> Self {
+    pub(super) fn binary_op(&self, rhs: &Self, forward: fn(f64, f64) -> f64, op: Op) -> Self {
         Self::new(
             if self.with_grad() || rhs.with_grad() {
                 Some(GradId::new())
             } else {
                 None
             },
-            self.iter_binary_op(rhs, fn_forward),
+            self.iter_binary_op(rhs, forward),
             op,
         )
     }
@@ -1106,7 +1566,7 @@ impl Tensor {
     pub(super) fn broadcast_binary_op(
         &self,
         rhs: f64,
-        fn_forward: fn(f64, f64) -> f64,
+        forward: fn(f64, f64) -> f64,
         op: Op,
     ) -> Self {
         Self::new(
@@ -1115,7 +1575,7 @@ impl Tensor {
             } else {
                 None
             },
-            self.broadcast_iter_binary_op(rhs, fn_forward),
+            self.broadcast_iter_binary_op(rhs, forward),
             op,
         )
     }
@@ -1135,50 +1595,40 @@ impl Expression {
         self.binary_op::<Max>(rhs)
     }
     #[inline]
-    pub fn eq(&self, rhs: &Self) -> Self {
-        self.binary_op::<Eq>(rhs)
+    pub fn logic_and(&self, rhs: &Self) -> Self {
+        self.binary_op::<LogicAnd>(rhs)
     }
     #[inline]
-    pub fn ne(&self, rhs: &Self) -> Self {
-        self.binary_op::<Ne>(rhs)
-    }
-    #[inline]
-    pub fn le(&self, rhs: &Self) -> Self {
-        self.binary_op::<Le>(rhs)
-    }
-    #[inline]
-    pub fn ge(&self, rhs: &Self) -> Self {
-        self.binary_op::<Ge>(rhs)
-    }
-    #[inline]
-    pub fn lt(&self, rhs: &Self) -> Self {
-        self.binary_op::<Lt>(rhs)
-    }
-    #[inline]
-    pub fn gt(&self, rhs: &Self) -> Self {
-        self.binary_op::<Gt>(rhs)
+    pub fn logic_or(&self, rhs: &Self) -> Self {
+        self.binary_op::<LogicOr>(rhs)
     }
     #[inline]
     fn binary_op<T: BinaryOpT>(&self, rhs: &Self) -> Self {
         match (self, rhs) {
-            (Self::Const(v1), Self::Const(v2)) => Self::Const(T::fn_forward_lhs_rhs(*v1, *v2)),
-            (Self::Const(v1), Self::Tensor(tensor2)) => Self::Tensor(tensor2.broadcast_binary_op(
-                *v1,
-                T::fn_forward_rhs_lhs,
-                Op::Binary(Self::Const(*v1), Self::Tensor(tensor2.clone()), T::OP),
-            )),
-            (Self::Tensor(tensor1), Self::Const(v2)) => Self::Tensor(tensor1.broadcast_binary_op(
-                *v2,
-                T::fn_forward_lhs_rhs,
-                Op::Binary(Self::Tensor(tensor1.clone()), Self::Const(*v2), T::OP),
-            )),
-            (Expression::Tensor(tensor1), Expression::Tensor(tensor2)) => {
-                Self::Tensor(tensor1.binary_op(
-                    tensor2,
-                    T::fn_forward_lhs_rhs,
+            (Self::Const(lhs_x), Self::Const(rhs_x)) => {
+                Self::Const(T::forward_lhs_rhs(*lhs_x, *rhs_x))
+            }
+            (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
+                Self::Tensor(rhs_tensor.broadcast_binary_op(
+                    *lhs_x,
+                    T::forward_rhs_lhs,
+                    Op::Binary(Self::Const(*lhs_x), Self::Tensor(rhs_tensor.clone()), T::OP),
+                ))
+            }
+            (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
+                Self::Tensor(lhs_tensor.broadcast_binary_op(
+                    *rhs_x,
+                    T::forward_lhs_rhs,
+                    Op::Binary(Self::Tensor(lhs_tensor.clone()), Self::Const(*rhs_x), T::OP),
+                ))
+            }
+            (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
+                Self::Tensor(lhs_tensor.binary_op(
+                    rhs_tensor,
+                    T::forward_lhs_rhs,
                     Op::Binary(
-                        Self::Tensor(tensor1.clone()),
-                        Self::Tensor(tensor2.clone()),
+                        Self::Tensor(lhs_tensor.clone()),
+                        Self::Tensor(rhs_tensor.clone()),
                         T::OP,
                     ),
                 ))

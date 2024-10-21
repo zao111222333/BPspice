@@ -1,9 +1,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
+use itertools::izip;
 use num_traits::Zero;
 
 use super::{
-    op::{BinaryOp, Cond, Powf, UnaryOp},
+    op::{BinaryOp, CmpOp, Cond, Powf, SmoothCmp, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
 
@@ -22,6 +23,7 @@ impl Expression {
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
+                    Op::Cmp(lhs, rhs, cmp_op, smooth) => cmp_op.recompute(lhs, rhs, smooth, tensor),
                 },
             },
         }
@@ -109,7 +111,7 @@ impl BinaryOp {
         rhs: &Expression,
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
-        let [fn_forward_lhs_rhs, fn_forward_rhs_lhs] = self.fn_forward();
+        let [fn_forward_lhs_rhs, fn_forward_rhs_lhs] = self.forward();
         match (lhs.recompute(), rhs.recompute()) {
             (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_))
                 => unreachable!(),
@@ -138,6 +140,69 @@ impl BinaryOp {
     }
 }
 
+impl CmpOp {
+    fn recompute<'a>(
+        &self,
+        lhs: &Expression,
+        rhs: &Expression,
+        smooth: &SmoothCmp,
+        tensor: &'a Tensor,
+    ) -> RecomputeScalarTensor<'a> {
+        match (lhs.recompute(), rhs.recompute()) {
+            (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_)) => unreachable!(),
+            (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorNoChange(_))
+            | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_))
+            | (
+                RecomputeScalarTensor::TensorNoChange(_),
+                RecomputeScalarTensor::TensorNoChange(_),
+            ) => RecomputeScalarTensor::nochange(tensor),
+            (
+                RecomputeScalarTensor::Scalar(lhs_x),
+                RecomputeScalarTensor::TensorChanged(rhs_tensor),
+            ) => RecomputeScalarTensor::change(
+                tensor,
+                self.forward_iter_fix_lhs(
+                    smooth,
+                    *lhs_x,
+                    rhs_tensor.values().read().unwrap().iter(),
+                ),
+            ),
+            (
+                RecomputeScalarTensor::TensorChanged(lhs_tensor),
+                RecomputeScalarTensor::Scalar(rhs_x),
+            ) => RecomputeScalarTensor::change(
+                tensor,
+                self.forward_iter_fix_rhs(
+                    smooth,
+                    *rhs_x,
+                    lhs_tensor.values().read().unwrap().iter(),
+                ),
+            ),
+            (
+                RecomputeScalarTensor::TensorChanged(lhs_tensor),
+                RecomputeScalarTensor::TensorNoChange(rhs_tensor),
+            )
+            | (
+                RecomputeScalarTensor::TensorChanged(lhs_tensor),
+                RecomputeScalarTensor::TensorChanged(rhs_tensor),
+            )
+            | (
+                RecomputeScalarTensor::TensorNoChange(lhs_tensor),
+                RecomputeScalarTensor::TensorChanged(rhs_tensor),
+            ) => RecomputeScalarTensor::change(
+                tensor,
+                self.forward_iter(
+                    smooth,
+                    izip!(
+                        lhs_tensor.values().read().unwrap().iter(),
+                        rhs_tensor.values().read().unwrap().iter()
+                    ),
+                ),
+            ),
+        }
+    }
+}
+
 impl Powf {
     fn recompute<'a>(n: f64, node: &Expression, tensor: &'a Tensor) -> RecomputeScalarTensor<'a> {
         match node.recompute() {
@@ -145,7 +210,7 @@ impl Powf {
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
             RecomputeScalarTensor::TensorChanged(node_tensor) => RecomputeScalarTensor::change(
                 tensor,
-                node_tensor.broadcast_iter_binary_op(n, Powf::fn_forward),
+                node_tensor.broadcast_iter_binary_op(n, Powf::forward),
             ),
         }
     }
@@ -218,7 +283,7 @@ impl UnaryOp {
             RecomputeScalarTensor::Scalar(_) => unreachable!(),
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
             RecomputeScalarTensor::TensorChanged(node_tensor) => {
-                RecomputeScalarTensor::change(tensor, node_tensor.iter_unary_op(self.fn_forward()))
+                RecomputeScalarTensor::change(tensor, node_tensor.iter_unary_op(self.forward()))
             }
         }
     }
