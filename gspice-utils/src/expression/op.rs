@@ -178,7 +178,8 @@ impl Cond {
     }
 }
 impl Expression {
-    /// `&self` as condition, is_zero = false, otherwise = true
+    /// smoothing method
+    /// `cond*on_true + (1-cond)*on_false`
     #[inline]
     pub fn cond(&self, on_true: &Self, on_false: &Self) -> Self {
         match (self, on_true, on_false) {
