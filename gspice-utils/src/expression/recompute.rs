@@ -17,8 +17,8 @@ impl Expression {
                 ChangeState::NeedSearch => match tensor.op() {
                     Op::Assgin => RecomputeScalarTensor::nochange(tensor),
                     Op::Powf(node, n) => Powf::recompute(*n, node, tensor),
-                    Op::Cond(cond, when_true, when_false) => {
-                        Cond::recompute(cond, when_true, when_false, tensor)
+                    Op::Cond(cond, on_true, on_false) => {
+                        Cond::recompute(cond, on_true, on_false, tensor)
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
@@ -109,29 +109,30 @@ impl BinaryOp {
         rhs: &Expression,
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
+        let [fn_forward_lhs_rhs, fn_forward_rhs_lhs] = self.fn_forward();
         match (lhs.recompute(), rhs.recompute()) {
             (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_))
                 => unreachable!(),
             (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorNoChange(_))
             | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_))
-            | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_)) 
+            | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_))
                 => RecomputeScalarTensor::nochange(tensor),
             (RecomputeScalarTensor::Scalar(lhs_x), RecomputeScalarTensor::TensorChanged(rhs_tensor))
                 => RecomputeScalarTensor::change(
                     tensor,
-                    rhs_tensor.broadcast_iter_binary_op(*lhs_x, self.fn_rhs_op_lhs()),
+                    rhs_tensor.broadcast_iter_binary_op(*lhs_x, fn_forward_rhs_lhs),
                 ),
-            (RecomputeScalarTensor::TensorChanged(lhs_tensor), RecomputeScalarTensor::Scalar(rhs_x)) 
+            (RecomputeScalarTensor::TensorChanged(lhs_tensor), RecomputeScalarTensor::Scalar(rhs_x))
                 => RecomputeScalarTensor::change(
                     tensor,
-                    lhs_tensor.broadcast_iter_binary_op(*rhs_x, self.fn_lhs_op_rhs()),
+                    lhs_tensor.broadcast_iter_binary_op(*rhs_x, fn_forward_lhs_rhs),
                 ),
             (RecomputeScalarTensor::TensorChanged(lhs_tensor), RecomputeScalarTensor::TensorNoChange(rhs_tensor))
             | (RecomputeScalarTensor::TensorChanged(lhs_tensor), RecomputeScalarTensor::TensorChanged(rhs_tensor))
-            | (RecomputeScalarTensor::TensorNoChange(lhs_tensor), RecomputeScalarTensor::TensorChanged(rhs_tensor)) 
+            | (RecomputeScalarTensor::TensorNoChange(lhs_tensor), RecomputeScalarTensor::TensorChanged(rhs_tensor))
                 => RecomputeScalarTensor::change(
                     tensor,
-                    lhs_tensor.iter_binary_op(rhs_tensor, self.fn_lhs_op_rhs()),
+                    lhs_tensor.iter_binary_op(rhs_tensor, fn_forward_lhs_rhs),
                 ),
         }
     }
@@ -144,7 +145,7 @@ impl Powf {
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
             RecomputeScalarTensor::TensorChanged(node_tensor) => RecomputeScalarTensor::change(
                 tensor,
-                node_tensor.broadcast_iter_binary_op(n, Powf::fn_op),
+                node_tensor.broadcast_iter_binary_op(n, Powf::fn_forward),
             ),
         }
     }
@@ -154,12 +155,12 @@ impl Cond {
     #[rustfmt::skip]
     fn recompute<'a>(
         cond: &Expression,
-        when_true: &Expression,
-        when_false: &Expression,
+        on_true: &Expression,
+        on_false: &Expression,
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
-        match (cond.recompute(), when_true.recompute(), when_false.recompute()){
-            (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_)) 
+        match (cond.recompute(), on_true.recompute(), on_false.recompute()){
+            (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_))
                 => unreachable!(),
             (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorNoChange(_))
             | (RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_))
@@ -167,46 +168,46 @@ impl Cond {
             | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::Scalar(_))
             | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorNoChange(_))
             | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::Scalar(_))
-            | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_)) 
+            | (RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorNoChange(_))
                 => RecomputeScalarTensor::nochange(tensor),
-            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorChanged(when_false_tensor))
-            | (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorChanged(when_false_tensor))
+            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::Scalar(_), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+            | (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorNoChange(_), RecomputeScalarTensor::TensorChanged(on_false_tensor))
                 => if cond_x.is_zero() {
-                    RecomputeScalarTensor::change(tensor, when_false_tensor.values().read().unwrap().clone())
+                    RecomputeScalarTensor::change(tensor, on_false_tensor.values().read().unwrap().clone())
                 } else {
                     RecomputeScalarTensor::nochange(tensor)
                 },
-            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::Scalar(_))
-            | (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorNoChange(_))
+            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::Scalar(_))
+            | (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorNoChange(_))
                 => if cond_x.is_zero() {
                     RecomputeScalarTensor::nochange(tensor)
                 } else {
-                    RecomputeScalarTensor::change(tensor, when_true_tensor.values().read().unwrap().clone())
+                    RecomputeScalarTensor::change(tensor, on_true_tensor.values().read().unwrap().clone())
                 },
-            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorChanged(when_false_tensor))
+            (RecomputeScalarTensor::Scalar(cond_x), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorChanged(on_false_tensor))
                 => if cond_x.is_zero() {
-                    RecomputeScalarTensor::change(tensor, when_false_tensor.values().read().unwrap().clone())
+                    RecomputeScalarTensor::change(tensor, on_false_tensor.values().read().unwrap().clone())
                 } else {
-                    RecomputeScalarTensor::change(tensor, when_true_tensor.values().read().unwrap().clone())
+                    RecomputeScalarTensor::change(tensor, on_true_tensor.values().read().unwrap().clone())
                 },
-            (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(when_true_x), RecomputeScalarTensor::Scalar(when_false_x))
-                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_x_x(cond_tensor, *when_true_x, *when_false_x)),
-            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::Scalar(when_true_x), RecomputeScalarTensor::TensorChanged(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(when_true_x), RecomputeScalarTensor::TensorNoChange(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(when_true_x), RecomputeScalarTensor::TensorChanged(when_false_tensor)) 
-                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_x_tensor(cond_tensor, *when_true_x, when_false_tensor)),
-            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::Scalar(when_false_x))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(when_true_tensor), RecomputeScalarTensor::Scalar(when_false_x))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::Scalar(when_false_x)) 
-                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_tensor_x(cond_tensor, when_true_tensor, *when_false_x)),
-            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorNoChange(when_true_tensor), RecomputeScalarTensor::TensorChanged(when_false_tensor))
-            | (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorNoChange(when_false_tensor))
-            | (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorChanged(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(when_true_tensor), RecomputeScalarTensor::TensorNoChange(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(when_true_tensor), RecomputeScalarTensor::TensorChanged(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorNoChange(when_false_tensor))
-            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(when_true_tensor), RecomputeScalarTensor::TensorChanged(when_false_tensor)) 
-                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_tensor_tensor(cond_tensor, when_true_tensor, when_false_tensor)),
+            (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(on_true_x), RecomputeScalarTensor::Scalar(on_false_x))
+                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_x_x(cond_tensor, *on_true_x, *on_false_x)),
+            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::Scalar(on_true_x), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(on_true_x), RecomputeScalarTensor::TensorNoChange(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::Scalar(on_true_x), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_x_tensor(cond_tensor, *on_true_x, on_false_tensor)),
+            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::Scalar(on_false_x))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(on_true_tensor), RecomputeScalarTensor::Scalar(on_false_x))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::Scalar(on_false_x))
+                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_tensor_x(cond_tensor, on_true_tensor, *on_false_x)),
+            (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorNoChange(on_true_tensor), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+            | (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorNoChange(on_false_tensor))
+            | (RecomputeScalarTensor::TensorNoChange(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(on_true_tensor), RecomputeScalarTensor::TensorNoChange(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorNoChange(on_true_tensor), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorNoChange(on_false_tensor))
+            | (RecomputeScalarTensor::TensorChanged(cond_tensor), RecomputeScalarTensor::TensorChanged(on_true_tensor), RecomputeScalarTensor::TensorChanged(on_false_tensor))
+                => RecomputeScalarTensor::change(tensor, Self::iter_tensor_tensor_tensor(cond_tensor, on_true_tensor, on_false_tensor)),
         }
     }
 }
@@ -217,7 +218,7 @@ impl UnaryOp {
             RecomputeScalarTensor::Scalar(_) => unreachable!(),
             RecomputeScalarTensor::TensorNoChange(_) => RecomputeScalarTensor::nochange(tensor),
             RecomputeScalarTensor::TensorChanged(node_tensor) => {
-                RecomputeScalarTensor::change(tensor, node_tensor.iter_unary_op(self.fn_op()))
+                RecomputeScalarTensor::change(tensor, node_tensor.iter_unary_op(self.fn_forward()))
             }
         }
     }

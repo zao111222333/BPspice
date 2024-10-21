@@ -1,6 +1,7 @@
 #![cfg(test)]
 use itertools::izip;
 use ordered_float::OrderedFloat;
+use rand::prelude::Distribution;
 use serial_test::serial;
 
 use crate::{before_update, Expression};
@@ -121,8 +122,8 @@ fn gradient_decent() {
     let n = 200;
     let iter = 10000;
     let step = 0.01;
-    let (x, x_ref) = Expression::uniform(n, -10.0, 10.0, true);
-    let (y, y_ref) = Expression::uniform(n, -10.0, 10.0, true);
+    let (x, x_ref) = Expression::rand_uniform(n, -10.0, 10.0, true);
+    let (y, y_ref) = Expression::rand_uniform(n, -10.0, 10.0, true);
     let f = &x.sqr() + &y.sqr();
     let mut loss = f64::MAX;
     for i in 0..iter {
@@ -189,8 +190,8 @@ fn len_mismatch_update() {
 #[serial]
 #[rustfmt::skip]
 fn backward_clone() {
-    let (a, a_ref) = Expression::uniform(10, -10.0, 10.0, true);
-    let (b, b_ref) = Expression::uniform(10, -10.0, 10.0, true);
+    let (a, a_ref) = Expression::rand_uniform(10, -10.0, 10.0, true);
+    let (b, b_ref) = Expression::rand_uniform(10, -10.0, 10.0, true);
     
     let f = a.mul(&b);
     let grads = f.backward();
@@ -314,6 +315,62 @@ fn backward_min_max() {
     assert_grad!(dmax_db, vec![1.0, 0.5, 0.0]);
     assert_grad!(dmin_db, vec![0.0, 0.5, 1.0]);
 }
+
+#[test]
+#[serial]
+#[rustfmt::skip]
+fn backward_cond() {
+    let len = 2000;
+    let distr1 = rand::distributions::Bernoulli::new(0.3).unwrap();
+    let distr2 = rand::distributions::Uniform::<f64>::new(-10.0, 10.0);
+    let mut rng = rand::thread_rng();
+    let cond_values: Vec<u8> = distr1.sample_iter(&mut rng).take(len).map(|b|if b{1}else{0}).collect();
+    let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    let (cond, cond_ref) = Expression::tensor(cond_values.iter().map(|n| *n as f64).collect(), true);
+    let (a, a_ref) = Expression::tensor(a_values.clone(), true);
+    let (b, b_ref) = Expression::tensor(b_values.clone(), true);
+    let f = cond.cond(&a, &b);
+
+    let candle_cond = candle_core::Tensor::new(cond_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a_var = candle_core::Var::new(a_values, &candle_core::Device::Cpu).unwrap();
+    let candle_b_var = candle_core::Var::new(b_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a = candle_a_var.as_tensor();
+    let candle_b = candle_b_var.as_tensor();
+    let candle_f = candle_cond.where_cond(candle_a, candle_b).unwrap();
+    assert_candle_tensor!(&f, &candle_f, (&a_ref, &candle_a), (&b_ref, &candle_b));
+
+    before_update();
+    let cond_values: Vec<u8> = distr1.sample_iter(&mut rng).take(len).map(|b|if b{1}else{0}).collect();
+    let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    cond_ref.assgin(cond_values.iter().map(|n| *n as f64).collect());
+    a_ref.assgin(a_values.clone());
+    b_ref.assgin(b_values.clone());
+    let candle_cond = candle_core::Tensor::new(cond_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a_var = candle_core::Var::new(a_values, &candle_core::Device::Cpu).unwrap();
+    let candle_b_var = candle_core::Var::new(b_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a = candle_a_var.as_tensor();
+    let candle_b = candle_b_var.as_tensor();
+    let candle_f = candle_cond.where_cond(candle_a, candle_b).unwrap();
+    assert_candle_tensor!(&f, &candle_f, (&a_ref, &candle_a), (&b_ref, &candle_b));
+
+    before_update();
+    let cond_values: Vec<u8> = distr1.sample_iter(&mut rng).take(len).map(|b|if b{1}else{0}).collect();
+    let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
+    cond_ref.assgin(cond_values.iter().map(|n| *n as f64).collect());
+    a_ref.assgin(a_values.clone());
+    b_ref.assgin(b_values.clone());
+    let candle_cond = candle_core::Tensor::new(cond_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a_var = candle_core::Var::new(a_values, &candle_core::Device::Cpu).unwrap();
+    let candle_b_var = candle_core::Var::new(b_values, &candle_core::Device::Cpu).unwrap();
+    let candle_a = candle_a_var.as_tensor();
+    let candle_b = candle_b_var.as_tensor();
+    let candle_f = candle_cond.where_cond(candle_a, candle_b).unwrap();
+    assert_candle_tensor!(&f, &candle_f, (&a_ref, &candle_a), (&b_ref, &candle_b));
+}
+
 #[test]
 #[serial]
 #[rustfmt::skip]

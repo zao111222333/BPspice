@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::{
-    op::{BinaryOp, Powf, UnaryOp},
+    op::{BinaryOp, Cond, Powf, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
 use core::{cmp::Ordering, fmt};
@@ -76,11 +76,10 @@ impl Expression {
                         match tensor.op() {
                             Op::Assgin => (),
                             Op::Powf(expr, _) => walk(expr, already_seen),
-                            Op::Cond(_, when_true, when_false) => {
-                                // FIXME:
-                                // walk(cond, already_seen);
-                                walk(when_true, already_seen);
-                                walk(when_false, already_seen);
+                            Op::Cond(cond, on_true, on_false) => {
+                                walk(cond, already_seen);
+                                walk(on_true, already_seen);
+                                walk(on_false, already_seen);
                             }
                             Op::Unary(expr, _) => walk(expr, already_seen),
                             Op::Binary(expr1, expr2, _) => {
@@ -114,7 +113,9 @@ impl Expression {
                 match tensor.op() {
                     Op::Assgin => unreachable!(),
                     Op::Powf(node, n) => Powf::backward(*n, tensor, node, &mut grads, grad),
-                    Op::Cond(cond, when_true, when_false) => todo!(),
+                    Op::Cond(cond, on_true, on_false) => {
+                        Cond::backward(cond, on_true, on_false, &mut grads, grad)
+                    }
                     Op::Unary(node, unary_op) => {
                         unary_op.backward(tensor, node, &mut grads, grad);
                     }
@@ -212,6 +213,155 @@ impl Powf {
                     }
                 }
             }
+        }
+    }
+}
+
+impl Cond {
+    #[rustfmt::skip]
+    fn backward(
+        cond: &Expression,
+        on_true: &Expression,
+        on_false: &Expression,
+        grads: &mut GradStore,
+        grad: Grad,
+    ) {
+        match (cond, on_true, on_false){
+            (Expression::Const(_), Expression::Const(_), Expression::Const(_)) => unreachable!(),
+            (Expression::Const(cond_x), Expression::Const(on_true_x), Expression::Tensor(on_false_tensor)) => {
+                if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
+                    for (on_false_grad, grad, on_false_x) in itertools::izip!(
+                        on_false_sum_grad.iter_mut(),
+                        grad.iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                    }
+                }
+            },
+            (Expression::Const(cond_x), Expression::Tensor(on_true_tensor), Expression::Const(on_false_x)) => {
+                if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
+                    for (on_true_grad, grad, on_true_x) in itertools::izip!(
+                        on_true_sum_grad.iter_mut(),
+                        grad.iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                    }
+                }
+            },
+            (Expression::Const(cond_x), Expression::Tensor(on_true_tensor), Expression::Tensor(on_false_tensor)) => {
+                if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
+                    for (on_true_grad, grad, on_true_x, on_false_x) in itertools::izip!(
+                        on_true_sum_grad.iter_mut(),
+                        grad.iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                    }
+                }
+                if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
+                    for (on_false_grad, grad, on_true_x, on_false_x) in itertools::izip!(
+                        on_false_sum_grad.iter_mut(),
+                        grad.iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                    }
+                }
+            },
+            (Expression::Tensor(cond_tensor), Expression::Const(on_true_x), Expression::Const(on_false_x)) => {
+                if let Some(cond_sum_grad) = grads.or_insert(cond_tensor) {
+                    for (cond_grad, grad, cond_x) in itertools::izip!(
+                        cond_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                    }
+                }
+            },
+            (Expression::Tensor(cond_tensor), Expression::Const(on_true_x), Expression::Tensor(on_false_tensor)) => {
+                if let Some(cond_sum_grad) = grads.or_insert(cond_tensor) {
+                    for (cond_grad, grad, cond_x, on_false_x) in itertools::izip!(
+                        cond_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                    }
+                }
+                if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
+                    for (on_false_grad, grad, cond_x, on_false_x) in itertools::izip!(
+                        on_false_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                    }
+                }
+            },
+            (Expression::Tensor(cond_tensor), Expression::Tensor(on_true_tensor), Expression::Const(on_false_x)) => {
+                if let Some(cond_sum_grad) = grads.or_insert(cond_tensor) {
+                    for (cond_grad, grad, cond_x, on_true_x) in itertools::izip!(
+                        cond_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                    }
+                }
+                if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
+                    for (on_true_grad, grad, cond_x, on_true_x) in itertools::izip!(
+                        on_true_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                    }
+                }
+            },
+            (Expression::Tensor(cond_tensor), Expression::Tensor(on_true_tensor), Expression::Tensor(on_false_tensor)) => {
+                if let Some(cond_sum_grad) = grads.or_insert(cond_tensor) {
+                    for (cond_grad, grad, cond_x, on_true_x, on_false_x) in itertools::izip!(
+                        cond_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_cond(cond_x, on_true_x, on_false_x, grad, cond_grad);
+                    }
+                }
+                if let Some(on_true_sum_grad) = grads.or_insert(on_true_tensor) {
+                    for (on_true_grad, grad, cond_x, on_true_x, on_false_x) in itertools::izip!(
+                        on_true_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_true(cond_x, on_true_x, on_false_x, grad, on_true_grad);
+                    }
+                }
+                if let Some(on_false_sum_grad) = grads.or_insert(on_false_tensor) {
+                    for (on_false_grad, grad, cond_x, on_true_x, on_false_x) in itertools::izip!(
+                        on_false_sum_grad.iter_mut(),
+                        grad.iter(),
+                        cond_tensor.values().read().unwrap().iter(),
+                        on_true_tensor.values().read().unwrap().iter(),
+                        on_false_tensor.values().read().unwrap().iter(),
+                    ) {
+                        Self::fn_backward_on_false(cond_x, on_true_x, on_false_x, grad, on_false_grad);
+                    }
+                }
+            },
         }
     }
 }

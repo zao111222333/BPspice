@@ -4,9 +4,12 @@ mod op;
 mod recompute;
 mod test;
 
+use ordered_float::OrderedFloat;
+use rand::prelude::Distribution;
 pub use recompute::before_update;
 
 use autograd::GradId;
+use num_traits::identities::{One, Zero};
 use op::Op;
 use recompute::ChangeMarker;
 use std::sync::{Arc, RwLock};
@@ -25,12 +28,10 @@ impl Tensor {
     }
     #[inline]
     fn zeros_like(&self) -> Vec<f64> {
-        use num_traits::identities::Zero;
         vec![f64::zero(); self.values().read().unwrap().len()]
     }
     #[inline]
     fn ones_like(&self) -> Vec<f64> {
-        use num_traits::identities::One;
         vec![f64::one(); self.values().read().unwrap().len()]
     }
     #[inline]
@@ -124,27 +125,40 @@ impl Expression {
     }
     #[inline]
     pub fn zeros(len: usize, need_grad: bool) -> (Self, TensorRef) {
-        use num_traits::identities::Zero;
         Self::tensor(vec![f64::zero(); len], need_grad)
     }
     #[inline]
     pub fn ones(len: usize, need_grad: bool) -> (Self, TensorRef) {
-        use num_traits::identities::One;
         Self::tensor(vec![f64::one(); len], need_grad)
     }
     #[inline]
-    pub fn rand<D: rand::distributions::Distribution<f64>>(
+    pub fn rand<T, D: rand::distributions::Distribution<T>>(
         len: usize,
         distr: D,
+        f: fn(T) -> f64,
         need_grad: bool,
     ) -> (Self, TensorRef) {
         let mut rng = rand::thread_rng();
-        Self::tensor(distr.sample_iter(&mut rng).take(len).collect(), need_grad)
+        Self::tensor(
+            distr.sample_iter(&mut rng).take(len).map(f).collect(),
+            need_grad,
+        )
     }
     #[inline]
-    pub fn uniform(len: usize, lower: f64, upper: f64, need_grad: bool) -> (Self, TensorRef) {
+    pub fn rand_uniform(len: usize, lower: f64, upper: f64, need_grad: bool) -> (Self, TensorRef) {
         let distr = rand::distributions::Uniform::new(lower, upper);
-        Self::rand(len, distr, need_grad)
+        Self::rand(len, distr, |f| f, need_grad)
+    }
+    #[inline]
+    pub fn rand_bernoulli(len: usize, p: f64, need_grad: bool) -> (Self, TensorRef) {
+        let distr =
+            rand::distributions::Bernoulli::new(p.max(f64::zero()).min(f64::one())).unwrap();
+        Self::rand(
+            len,
+            distr,
+            |b| if b { f64::one() } else { f64::zero() },
+            need_grad,
+        )
     }
     /// get the value / recompute and get the value
     #[inline]
