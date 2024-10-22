@@ -1,28 +1,32 @@
+use itertools::izip;
+use pyo3::prelude::*;
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicUsize, Ordering::Relaxed},
 };
 
-use itertools::izip;
-
 use super::{
-    op::{BinaryOp, CmpOp, Cond, Powf, CmpMethod, UnaryOp},
+    op::{BinaryOp, CmpMethod, CmpOp, Cond, Powf, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
-use core::{cmp::Ordering, fmt};
+use core::cmp::Ordering;
 
 #[derive(Debug)]
-pub struct Grad(Vec<f64>);
+#[pyclass]
+pub struct Grad(pub(super) Vec<f64>);
 impl Grad {
     pub fn inner(self) -> Vec<f64> {
         self.0
     }
 }
-
-impl fmt::Display for Grad {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Grad({:?})", self.0)
+#[pymethods]
+impl Grad {
+    fn value(&self) -> Vec<f64> {
+        self.0.clone()
+    }
+    fn __repr__(&self) -> String {
+        self.to_string()
     }
 }
 
@@ -61,46 +65,47 @@ impl GradId {
 }
 
 /// A store for gradients, associating a scalar id to the corresponding gradient scalar, used for back propagation.
+#[pyclass]
 #[derive(Debug)]
 pub struct GradStore(HashMap<GradId, Grad>);
 
 impl Expression {
-    /// Return all the nodes that lead to this value in a topologically sorted vec, the first
-    /// elements having dependencies on the latter ones, e.g. the first element if any is the
-    /// argument.
-    /// This assumes that the op graph is a DAG.
-    fn sorted_nodes(&self) -> BTreeMap<GradId, &Tensor> {
-        fn walk<'a>(expr: &'a Expression, already_seen: &mut BTreeMap<GradId, &'a Tensor>) {
-            if let Expression::Tensor(tensor) = expr {
-                if let Some(grad_id) = tensor.grad_id() {
-                    if already_seen.get(grad_id).is_none() {
-                        already_seen.insert(*grad_id, &tensor);
-                        match tensor.op() {
-                            Op::Assgin => (),
-                            Op::Powf(node, _) => walk(node, already_seen),
-                            Op::Cond(cond, on_true, on_false) => {
-                                walk(cond, already_seen);
-                                walk(on_true, already_seen);
-                                walk(on_false, already_seen);
-                            }
-                            Op::Unary(node, _) => walk(node, already_seen),
-                            Op::Binary(lhs, rhs, _) => {
-                                walk(lhs, already_seen);
-                                walk(rhs, already_seen);
-                            }
-                            Op::Cmp(lhs, rhs, _, _) => {
-                                walk(lhs, already_seen);
-                                walk(rhs, already_seen);
-                            }
+    fn grad_walk<'a>(&'a self, already_seen: &mut BTreeMap<GradId, &'a Tensor>) {
+        if let Expression::Tensor(tensor) = self {
+            if let Some(grad_id) = tensor.grad_id() {
+                if already_seen.get(grad_id).is_none() {
+                    already_seen.insert(*grad_id, &tensor);
+                    match tensor.op() {
+                        Op::Assgin => (),
+                        Op::Powf(node, _) => node.grad_walk(already_seen),
+                        Op::Cond(cond, on_true, on_false) => {
+                            cond.grad_walk(already_seen);
+                            on_true.grad_walk(already_seen);
+                            on_false.grad_walk(already_seen);
+                        }
+                        Op::Unary(node, _) => node.grad_walk(already_seen),
+                        Op::Binary(lhs, rhs, _) | Op::Cmp(lhs, rhs, _, _) => {
+                            lhs.grad_walk(already_seen);
+                            rhs.grad_walk(already_seen);
                         }
                     }
                 }
             }
         }
+    }
+    /// Return all the nodes that lead to this value in a topologically sorted vec, the first
+    /// elements having dependencies on the latter ones, e.g. the first element if any is the
+    /// argument.
+    /// This assumes that the op graph is a DAG.
+    fn sorted_nodes(&self) -> BTreeMap<GradId, &Tensor> {
         let mut already_seen = BTreeMap::new();
-        walk(self, &mut already_seen);
+        self.grad_walk(&mut already_seen);
         already_seen
     }
+}
+
+#[pymethods]
+impl Expression {
     /// When you update the compute graph's tensor value.
     /// You need [self.value](Expression::value) before
     /// run [self.backward](Expression::backward) to update its compute graph's value
@@ -140,6 +145,18 @@ impl Expression {
     }
 }
 
+#[pymethods]
+impl GradStore {
+    /// Remove & take the gradient tensor associated with the given tensor-reference
+    pub fn take(&mut self, tensor_ref: &TensorRef) -> Option<Grad> {
+        if let Some(grad_id) = tensor_ref.0.grad_id() {
+            self.0.remove(grad_id)
+        } else {
+            panic!("The tensor is not with gradient")
+        }
+    }
+}
+
 impl GradStore {
     /// Create a new gradient store
     fn new() -> Self {
@@ -150,15 +167,6 @@ impl GradStore {
     pub fn get(&self, tensor_ref: &TensorRef) -> Option<&Grad> {
         if let Some(grad_id) = tensor_ref.0.grad_id() {
             self.0.get(grad_id)
-        } else {
-            panic!("The tensor is not with gradient")
-        }
-    }
-
-    /// Remove & take the gradient tensor associated with the given tensor-reference
-    pub fn remove(&mut self, tensor_ref: &TensorRef) -> Option<Grad> {
-        if let Some(grad_id) = tensor_ref.0.grad_id() {
-            self.0.remove(grad_id)
         } else {
             panic!("The tensor is not with gradient")
         }

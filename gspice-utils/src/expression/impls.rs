@@ -1,12 +1,38 @@
 use super::{
-    op::{CmpOp, CmpOpT, CmpMethod, CmpMethodLinear, CmpMethodDiscret, CmpMethodSigmoid, CmpMethodT},
+    autograd::Grad,
+    op::{
+        CmpMethod, CmpMethodDiscret, CmpMethodLinear, CmpMethodSigmoid, CmpMethodT, CmpOp, CmpOpT,
+    },
     Expression, ScalarTensor, Tensor,
 };
 use core::fmt;
+use std::fmt::Write;
 
+pub(crate) fn fmt_vec(vec: &[f64], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut buffer = ryu::Buffer::new();
+    let len = vec.len();
+    if len >= 100 {
+        write!(f, "([{}, ", buffer.format(vec[0]))?;
+        write!(f, "{}, ", buffer.format(vec[1]))?;
+        write!(f, "{}, ..., ", buffer.format(vec[2]))?;
+        write!(f, "{}, ", buffer.format(vec[len - 3]))?;
+        write!(f, "{}, ", buffer.format(vec[len - 2]))?;
+        write!(f, "{}]) [{len}x1]", buffer.format(vec[len - 1]))
+    } else {
+        let mut iter = vec.iter();
+        if let Some(first) = iter.next() {
+            f.write_char('[')?;
+            f.write_str(buffer.format(*first))?;
+            for x in iter {
+                write!(f, ", {}", buffer.format(*x))?;
+            }
+        }
+        write!(f, "])")
+    }
+}
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.values().read().unwrap(), f)
+        fmt_vec(&self.values().read().unwrap(), f)
     }
 }
 
@@ -15,9 +41,15 @@ impl fmt::Display for Expression {
         match self {
             Expression::Const(v) => write!(f, "Const({})", v),
             Expression::Tensor(tensor) => {
-                write!(f, "Tensor({})", tensor)
+                write!(f, "Tensor{}", tensor)
             }
         }
+    }
+}
+impl fmt::Display for Grad {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Grad")?;
+        fmt_vec(&self.0, f)
     }
 }
 
@@ -42,7 +74,8 @@ impl<'a> fmt::Display for ScalarTensor<'a> {
         match self {
             ScalarTensor::Scalar(v) => write!(f, "Scalar({})", v),
             ScalarTensor::Tensor(tensor) => {
-                write!(f, "Tensor({:?})", tensor.read().unwrap())
+                write!(f, "Tensor")?;
+                fmt_vec(&tensor.read().unwrap(), f)
             }
         }
     }

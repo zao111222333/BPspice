@@ -39,7 +39,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = { version = "0.4", features = ["std", "serde"] }
 thiserror = "1.0"
 nom = "7.1"
-pyo3 = { version = "0.22.4", features = ["extension-module"] }
+pyo3 = { version = "0.22.4", features = ["extension-module", "multiple-pymethods", "abi3", "abi3-py37"] }
 num-traits = "0.2.19"
 rand = "0.8.5"
 serial_test = "0.5"
+ryu = "1.0"

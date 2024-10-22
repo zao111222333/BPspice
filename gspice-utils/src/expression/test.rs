@@ -118,6 +118,26 @@ macro_rules! assert_scalar {
 
 #[test]
 #[serial]
+fn recompute() {
+    let (a, a_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
+    let (b, b_ref) = Expression::tensor(vec![-1.0, -2.0, -3.0], true);
+    let c = a.mul(&b);
+    let f = c.add(&c);
+
+    // Update 1
+    before_update();
+    a_ref.assign(vec![6.0]);
+    b_ref.assign(vec![-4.0]);
+    f.value();
+    assert_eq!(
+        5,
+        crate::expression::recompute::TEST_RECOMPUTE_COUNT
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+}
+
+#[test]
+#[serial]
 fn gradient_decent() {
     let n = 200;
     let iter = 10000;
@@ -182,7 +202,7 @@ fn len_mismatch_update() {
     let (y, _) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
     let f = x.add(&y);
     before_update();
-    x_ref.assgin(vec![1.0]);
+    x_ref.assign(vec![1.0]);
     _ = f.value();
 }
 
@@ -226,9 +246,9 @@ fn backward_mul_add() {
 
     // Update 1
     before_update();
-    a_ref.assgin(vec![6.0]);
-    b_ref.assgin(vec![-4.0]);
-    c_ref.assgin(vec![2.0]);
+    a_ref.assign(vec![6.0]);
+    b_ref.assign(vec![-4.0]);
+    c_ref.assign(vec![2.0]);
     f.value();
     let grads = f.backward();
     let df_da = grads.get(&a_ref);
@@ -240,9 +260,9 @@ fn backward_mul_add() {
 
     // Update 2
     before_update();
-    a_ref.assgin(vec![2.0]);
-    b_ref.assgin(vec![5.0]);
-    c_ref.assgin(vec![2.0]);
+    a_ref.assign(vec![2.0]);
+    b_ref.assign(vec![5.0]);
+    c_ref.assign(vec![2.0]);
     f.value();
     let grads = f.backward();
     let df_da = grads.get(&a_ref);
@@ -344,9 +364,9 @@ fn backward_cond() {
     let cond_values: Vec<u8> = distr1.sample_iter(&mut rng).take(len).map(|b|if b{1}else{0}).collect();
     let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
     let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
-    cond_ref.assgin(cond_values.iter().map(|n| *n as f64).collect());
-    a_ref.assgin(a_values.clone());
-    b_ref.assgin(b_values.clone());
+    cond_ref.assign(cond_values.iter().map(|n| *n as f64).collect());
+    a_ref.assign(a_values.clone());
+    b_ref.assign(b_values.clone());
     let candle_cond = candle_core::Tensor::new(cond_values, &candle_core::Device::Cpu).unwrap();
     let candle_a_var = candle_core::Var::new(a_values, &candle_core::Device::Cpu).unwrap();
     let candle_b_var = candle_core::Var::new(b_values, &candle_core::Device::Cpu).unwrap();
@@ -359,9 +379,9 @@ fn backward_cond() {
     let cond_values: Vec<u8> = distr1.sample_iter(&mut rng).take(len).map(|b|if b{1}else{0}).collect();
     let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
     let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
-    cond_ref.assgin(cond_values.iter().map(|n| *n as f64).collect());
-    a_ref.assgin(a_values.clone());
-    b_ref.assgin(b_values.clone());
+    cond_ref.assign(cond_values.iter().map(|n| *n as f64).collect());
+    a_ref.assign(a_values.clone());
+    b_ref.assign(b_values.clone());
     let candle_cond = candle_core::Tensor::new(cond_values, &candle_core::Device::Cpu).unwrap();
     let candle_a_var = candle_core::Var::new(a_values, &candle_core::Device::Cpu).unwrap();
     let candle_b_var = candle_core::Var::new(b_values, &candle_core::Device::Cpu).unwrap();
@@ -713,8 +733,8 @@ fn binary_op() {
 
     // Update 1
     before_update();
-    tensor1_ref.assgin(vec![-3.0, 6.0]);
-    tensor2_ref.assgin(vec![3.0, -4.0]);
+    tensor1_ref.assign(vec![-3.0, 6.0]);
+    tensor2_ref.assign(vec![3.0, -4.0]);
 
     assert_tensor!(&const2_max_tensor2, vec![3.0, -2.0]);
     assert_tensor!(&const2_min_tensor2, vec![-2.0, -4.0]);
@@ -745,8 +765,8 @@ fn binary_op() {
 
     // Update 2
     before_update();
-    tensor1_ref.assgin(vec![6.0]);
-    tensor2_ref.assgin(vec![-4.0]);
+    tensor1_ref.assign(vec![6.0]);
+    tensor2_ref.assign(vec![-4.0]);
 
     assert_tensor!(&const2_max_tensor2, vec![-2.0]);
     assert_tensor!(&const2_min_tensor2, vec![-4.0]);
@@ -886,7 +906,7 @@ fn unary_op() {
     // Update1
     let values1 = vec![1.0, 2.0];
     before_update();
-    tensor1_ref.assgin(values1.clone());
+    tensor1_ref.assign(values1.clone());
 
     assert_tensor!(&tensor1_neg, values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());
     assert_tensor!(&tensor1_sin, values1.iter().map(|x| f64::sin(*x)).collect::<Vec<_>>());
@@ -922,7 +942,7 @@ fn unary_op() {
 
     // Update2
     let values1 = vec![1.0, 2.0];
-    tensor1_ref.assgin(values1.clone());
+    tensor1_ref.assign(values1.clone());
     before_update();
 
     assert_tensor!(&tensor1_neg, values1.iter().map(|x| Neg::neg(x)).collect::<Vec<_>>());

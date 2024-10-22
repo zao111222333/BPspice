@@ -1,15 +1,21 @@
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-
-use itertools::izip;
-use num_traits::Zero;
-
 use super::{
-    op::{BinaryOp, CmpOp, Cond, Powf, CmpMethod, UnaryOp},
+    op::{BinaryOp, CmpMethod, CmpOp, Cond, Powf, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
+use itertools::izip;
+use num_traits::Zero;
+use pyo3::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+#[cfg(test)]
+pub(crate) static TEST_RECOMPUTE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 impl Expression {
     pub(super) fn recompute<'a>(&'a self) -> RecomputeScalarTensor<'a> {
+        #[cfg(test)]
+        {
+            TEST_RECOMPUTE_COUNT.fetch_add(1, Relaxed);
+        }
         match self {
             Expression::Const(f) => RecomputeScalarTensor::Scalar(f),
             Expression::Tensor(tensor) => match tensor.change_marker().change_state() {
@@ -23,7 +29,9 @@ impl Expression {
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
-                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => cmp_op.recompute(lhs, rhs, cmp_method, tensor),
+                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => {
+                        cmp_op.recompute(lhs, rhs, cmp_method, tensor)
+                    }
                 },
             },
         }
@@ -66,7 +74,7 @@ impl<'a> RecomputeScalarTensor<'a> {
 }
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
+#[pyfunction]
 pub fn before_update() {
     // No need async, use Relaxed
     COUNTER.fetch_add(2, Relaxed);

@@ -1,26 +1,4 @@
 use pyo3::prelude::*;
-#[pyclass]
-struct Expr(gspice::Expression);
-
-#[pymethods]
-impl Expr {
-    #[new]
-    fn constant(value: f64) -> Self {
-        Self(gspice::Expression::constant(value))
-    }
-    // #[new]
-    // fn parameter(values: Vec<f64>, need_grad: bool) -> Self {
-    //     let (expr, tensor) = gspice::Expression::parameter(values, need_grad);
-    //     Self(expr)
-    // }
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("{}", self.0))
-    }
-    fn __add__(&self, other: &Self) -> Self {
-        use std::ops::Add;
-        Self(self.0.add(&other.0))
-    }
-}
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
@@ -36,8 +14,8 @@ struct Ckt {}
 /// import the module.
 #[pymodule(name = "gspice")]
 fn pymodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(add, m)?)?;
+    m.add_function(wrap_pyfunction!(gspice::before_update, m)?)?;
     m.add_class::<Ckt>()?;
-    m.add_class::<Expr>()?;
+    m.add_class::<gspice::Expression>()?;
     Ok(())
 }

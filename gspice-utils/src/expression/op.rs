@@ -1,6 +1,7 @@
 use itertools::izip;
 use num_traits::{One, Zero};
 use ordered_float::OrderedFloat;
+use pyo3::prelude::*;
 use std::{cmp::Ordering, fmt::Debug};
 
 use super::{Expression, GradId, Tensor};
@@ -177,6 +178,7 @@ impl Cond {
         .collect()
     }
 }
+#[pymethods]
 impl Expression {
     /// smoothing method
     /// `cond*on_true + (1-cond)*on_false`
@@ -318,12 +320,12 @@ impl UnaryOpT for Neg {
         *sum_grad -= grad;
     }
 }
+
 impl<'a> core::ops::Neg for &'a Expression {
     type Output = Expression;
-
     #[inline]
     fn neg(self) -> Self::Output {
-        Expression::unary_op::<Neg>(&self)
+        self.neg()
     }
 }
 
@@ -613,72 +615,79 @@ impl Tensor {
         )
     }
 }
-
+#[pymethods]
 impl Expression {
     #[inline]
+    pub fn neg(&self) -> Self {
+        Self::unary_op::<Neg>(&self)
+    }
+    #[inline]
     pub fn sin(&self) -> Self {
-        Expression::unary_op::<Sin>(&self)
+        Self::unary_op::<Sin>(&self)
     }
     #[inline]
     pub fn cos(&self) -> Self {
-        Expression::unary_op::<Cos>(&self)
+        Self::unary_op::<Cos>(&self)
     }
     #[inline]
     pub fn tanh(&self) -> Self {
-        Expression::unary_op::<Tanh>(&self)
+        Self::unary_op::<Tanh>(&self)
     }
     #[inline]
     pub fn tan(&self) -> Self {
-        Expression::unary_op::<Tan>(&self)
+        Self::unary_op::<Tan>(&self)
     }
     #[inline]
     pub fn ceil(&self) -> Self {
-        Expression::unary_op::<Ceil>(&self)
+        Self::unary_op::<Ceil>(&self)
     }
     #[inline]
     pub fn floor(&self) -> Self {
-        Expression::unary_op::<Floor>(&self)
+        Self::unary_op::<Floor>(&self)
     }
     #[inline]
     pub fn round(&self) -> Self {
-        Expression::unary_op::<Round>(&self)
+        Self::unary_op::<Round>(&self)
     }
     #[inline]
     pub fn sign(&self) -> Self {
-        Expression::unary_op::<Sign>(&self)
+        Self::unary_op::<Sign>(&self)
     }
     #[inline]
     pub fn sqrt(&self) -> Self {
-        Expression::unary_op::<Sqrt>(&self)
+        Self::unary_op::<Sqrt>(&self)
     }
     #[inline]
     pub fn sqr(&self) -> Self {
-        Expression::unary_op::<Sqr>(&self)
+        Self::unary_op::<Sqr>(&self)
     }
     #[inline]
     pub fn cubic(&self) -> Self {
-        Expression::unary_op::<Cubic>(&self)
+        Self::unary_op::<Cubic>(&self)
     }
     #[inline]
     pub fn log(&self) -> Self {
-        Expression::unary_op::<Log>(&self)
+        Self::unary_op::<Log>(&self)
     }
     #[inline]
     pub fn exp(&self) -> Self {
-        Expression::unary_op::<Exp>(&self)
+        Self::unary_op::<Exp>(&self)
     }
     #[inline]
     pub fn abs(&self) -> Self {
-        Expression::unary_op::<Abs>(&self)
+        Self::unary_op::<Abs>(&self)
     }
     #[inline]
     pub fn erf(&self) -> Self {
-        Expression::unary_op::<Erf>(&self)
+        Self::unary_op::<Erf>(&self)
     }
     #[inline]
     pub fn logic_not(&self) -> Self {
-        Expression::unary_op::<LogicNot>(&self)
+        Self::unary_op::<LogicNot>(&self)
     }
+}
+
+impl Expression {
     #[inline]
     fn unary_op<T: UnaryOpT>(&self) -> Self {
         match self {
@@ -1251,6 +1260,7 @@ pub(super) struct Ge;
 pub(super) struct Lt;
 pub(super) struct Gt;
 
+#[pymethods]
 impl Expression {
     #[inline]
     pub fn eq(&self, rhs: &Self) -> Self {
@@ -1277,42 +1287,42 @@ impl Expression {
         self.cmp_op::<Gt>(rhs, CmpMethod::Discret)
     }
     /// `eq(a,b) = sigmoid(a, b, k) = e^(-k (a - b)^2)`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn eq_sigmoid(&self, rhs: &Self, k: f64) -> Self {
         self.cmp_op::<Eq>(rhs, CmpMethod::new_sigmoid(k))
     }
     /// `ne(a,b) = 1- sigmoid(a, b, k) = 1-e^(-k (a - b)^2)`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn ne_sigmoid(&self, rhs: &Self, k: f64) -> Self {
         self.cmp_op::<Ne>(rhs, CmpMethod::new_sigmoid(k))
     }
     /// `le(a,b) = 1 / (1 + e^(k(a - b)))`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn le_sigmoid(&self, rhs: &Self, k: f64) -> Self {
         self.cmp_op::<Le>(rhs, CmpMethod::new_sigmoid(k))
     }
     /// `ge(a,b) = 1 / (1 + e^(-k(a - b)))`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn ge_sigmoid(&self, rhs: &Self, k: f64) -> Self {
         self.cmp_op::<Ge>(rhs, CmpMethod::new_sigmoid(k))
     }
     /// `lt(a,b) = 1 / (1 + e^(k(a - b)))`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn lt_sigmoid(&self, rhs: &Self, k: f64) -> Self {
         self.cmp_op::<Lt>(rhs, CmpMethod::new_sigmoid(k))
     }
     /// `gt(a,b) = 1 / (1 + e^(-k(a - b)))`
-    /// 
+    ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn gt_sigmoid(&self, rhs: &Self, k: f64) -> Self {
@@ -1336,7 +1346,7 @@ impl Expression {
     /// ``` text
     /// ___      ____    1
     ///    \    /        
-    ///     \  / 
+    ///     \  /
     ///      \/          0
     /// --------------->
     ///   -ε  0  ε     a-b
@@ -1350,7 +1360,7 @@ impl Expression {
     /// ``` text
     /// ____           1
     ///     \          
-    ///       \ 
+    ///       \
     ///         \___   0
     /// --------------->
     ///   -ε  0  ε     a-b
@@ -1364,7 +1374,7 @@ impl Expression {
     /// ``` text
     ///          ____  1
     ///         /      
-    ///       / 
+    ///       /
     /// ____/          0
     /// --------------->
     ///   -ε  0  ε     a-b
@@ -1378,7 +1388,7 @@ impl Expression {
     /// ``` text
     /// ____           1
     ///     \          
-    ///       \ 
+    ///       \
     ///         \___   0
     /// --------------->
     ///   -ε  0  ε     a-b
@@ -1392,7 +1402,7 @@ impl Expression {
     /// ``` text
     ///          ____  1
     ///         /      
-    ///       / 
+    ///       /
     /// ____/          0
     /// --------------->
     ///   -ε  0  ε     a-b
@@ -1402,6 +1412,9 @@ impl Expression {
     pub fn gt_linear(&self, rhs: &Self, epsilon: f64) -> Self {
         self.cmp_op::<Gt>(rhs, CmpMethod::new_linear(epsilon))
     }
+}
+
+impl Expression {
     /// CmpMethod only activate in gradient mode
     #[inline]
     fn cmp_op<T: CmpOpT>(&self, rhs: &Self, cmp_method: CmpMethod) -> Self {
@@ -1410,7 +1423,8 @@ impl Expression {
                 Self::Const(T::forward(&CmpMethod::Discret, *lhs_x, *rhs_x))
             }
             (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
-                let (grad_id, cmp_method) = if cmp_method.differentiable() && rhs_tensor.with_grad() {
+                let (grad_id, cmp_method) = if cmp_method.differentiable() && rhs_tensor.with_grad()
+                {
                     (Some(GradId::new()), cmp_method)
                 } else {
                     (None, CmpMethod::Discret)
@@ -1431,7 +1445,8 @@ impl Expression {
                 ))
             }
             (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
-                let (grad_id, cmp_method) = if cmp_method.differentiable() && lhs_tensor.with_grad() {
+                let (grad_id, cmp_method) = if cmp_method.differentiable() && lhs_tensor.with_grad()
+                {
                     (Some(GradId::new()), cmp_method)
                 } else {
                     (None, CmpMethod::Discret)
@@ -1580,7 +1595,7 @@ impl<'a, 'b> core::ops::Add<&'b Expression> for &'a Expression {
     type Output = Expression;
     #[inline]
     fn add(self, rhs: &'b Expression) -> Expression {
-        self.binary_op::<Add>(rhs)
+        self.add(rhs)
     }
 }
 
@@ -1608,7 +1623,7 @@ impl<'a, 'b> core::ops::Sub<&'b Expression> for &'a Expression {
     type Output = Expression;
     #[inline]
     fn sub(self, rhs: &'b Expression) -> Expression {
-        self.binary_op::<Sub>(rhs)
+        self.sub(rhs)
     }
 }
 
@@ -1636,7 +1651,7 @@ impl<'a, 'b> core::ops::Mul<&'b Expression> for &'a Expression {
     type Output = Expression;
     #[inline]
     fn mul(self, rhs: &'b Expression) -> Expression {
-        self.binary_op::<Mul>(rhs)
+        self.mul(rhs)
     }
 }
 
@@ -1664,7 +1679,7 @@ impl<'a, 'b> core::ops::Div<&'b Expression> for &'a Expression {
     type Output = Expression;
     #[inline]
     fn div(self, rhs: &'b Expression) -> Expression {
-        self.binary_op::<Div>(rhs)
+        self.div(rhs)
     }
 }
 
@@ -1847,7 +1862,24 @@ impl Tensor {
     }
 }
 
+#[pymethods]
 impl Expression {
+    #[inline]
+    pub fn add(&self, rhs: &Expression) -> Expression {
+        self.binary_op::<Add>(rhs)
+    }
+    #[inline]
+    pub fn sub(&self, rhs: &Expression) -> Expression {
+        self.binary_op::<Sub>(rhs)
+    }
+    #[inline]
+    pub fn mul(&self, rhs: &Expression) -> Expression {
+        self.binary_op::<Mul>(rhs)
+    }
+    #[inline]
+    pub fn div(&self, rhs: &Expression) -> Expression {
+        self.binary_op::<Div>(rhs)
+    }
     #[inline]
     pub fn pow(&self, rhs: &Self) -> Self {
         self.binary_op::<Pow>(rhs)
@@ -1868,6 +1900,8 @@ impl Expression {
     pub fn logic_or(&self, rhs: &Self) -> Self {
         self.binary_op::<LogicOr>(rhs)
     }
+}
+impl Expression {
     #[inline]
     fn binary_op<T: BinaryOpT>(&self, rhs: &Self) -> Self {
         match (self, rhs) {
