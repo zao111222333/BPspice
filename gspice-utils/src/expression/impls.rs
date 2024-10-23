@@ -3,8 +3,8 @@ use ordered_float::OrderedFloat;
 use super::{
     autograd::Grad,
     op::{
-        DiscreteBinaryOp, DiscreteBinaryOpT, GradMethod, GradMethodDiscrete, GradMethodLinear, GradMethodSigmoid,
-        GradMethodT,
+        DiscreteBinaryOp, DiscreteBinaryOpT, GradMethod, GradMethodDiscrete, GradMethodLinear,
+        GradMethodSigmoid, GradMethodT,
     },
     Expression, ScalarTensor, Tensor,
 };

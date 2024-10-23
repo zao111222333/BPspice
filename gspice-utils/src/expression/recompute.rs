@@ -1,5 +1,5 @@
 use super::{
-    op::{BinaryOp, DiscreteBinaryOp, Cond, Powf, UnaryOp},
+    op::{BinaryOp, Cond, DiscreteBinaryOp, Powf, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
 use itertools::izip;
@@ -28,7 +28,9 @@ impl Expression {
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
-                    Op::DiscreteBinary(lhs, rhs, discrete_binary_op, _) => discrete_binary_op.recompute(lhs, rhs, tensor),
+                    Op::DiscreteBinary(lhs, rhs, discrete_binary_op, _) => {
+                        discrete_binary_op.recompute(lhs, rhs, tensor)
+                    }
                 },
             },
         }

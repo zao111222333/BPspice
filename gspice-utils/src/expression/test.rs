@@ -155,6 +155,53 @@ fn len_mismatch_init() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
+#[should_panic]
+fn not_logic_check_cond() {
+    let (x, _) = Expression::tensor(vec![1.0, 0.0, 1.0], true);
+    x.cond(&x, &x);
+}
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic]
+fn not_logic_check_and() {
+    let (x, _) = Expression::tensor(vec![1.0, 0.0, 1.0], true);
+    x.logic_and(&x);
+}
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic]
+fn not_logic_check_or() {
+    let (x, _) = Expression::tensor(vec![1.0, 0.0, 1.0], true);
+    x.logic_or(&x);
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn not_logic_check() {
+    let (x, _) = Expression::tensor(vec![1.0, 0.0, 1.0], true);
+    let eq = x.eq(&x);
+    let ne = x.ne(&x);
+    let le = x.le(&x);
+    let lt = x.lt(&x);
+    let ge = x.ge(&x);
+    let gt = x.gt(&x);
+    eq.logic_not();
+    ne.logic_not();
+    le.logic_not();
+    lt.logic_not();
+    ge.logic_not();
+    gt.logic_not();
+    eq.cond(&x, &x);
+    let logic_and = eq.logic_and(&eq);
+    let logic_or = eq.logic_or(&eq);
+    let logic_not = eq.logic_not();
+    logic_and.logic_not();
+    logic_or.logic_not();
+    logic_not.logic_not();
+}
+
+#[test]
 #[serial]
 #[should_panic]
 fn len_mismatch_update() {
@@ -308,6 +355,7 @@ fn backward_cond() {
     let a_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
     let b_values: Vec<f64> = distr2.sample_iter(&mut rng).take(len).collect();
     let (cond, cond_ref) = Expression::tensor(cond_values.iter().map(|n| *n as f64).collect(), true);
+    cond.mark_logic();
     let (a, a_ref) = Expression::tensor(a_values.clone(), true);
     let (b, b_ref) = Expression::tensor(b_values.clone(), true);
     let f = cond.cond(&a, &b);

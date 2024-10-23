@@ -25,12 +25,8 @@ fn main() {
         let df_da = grads.get(&a_ref).unwrap();
         let df_db = grads.get(&b_ref).unwrap();
         before_update();
-        a_ref.update_callback(&df_da, |d: &f64| {
-            step * d
-        });
-        b_ref.update_callback(&df_db, |d: &f64| {
-            step * d
-        });
+        a_ref.update_callback(&df_da, |d: &f64| step * d);
+        b_ref.update_callback(&df_db, |d: &f64| step * d);
     }
     let loss = f_loss.value().overall_sum() / len as f64;
     println!("iter {iter}; loss = avg|a-b| = {loss:5e}");

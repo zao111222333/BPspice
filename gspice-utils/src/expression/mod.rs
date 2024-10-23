@@ -10,19 +10,31 @@ use autograd::GradId;
 use num_traits::identities::{One, Zero};
 use op::Op;
 use recompute::ChangeMarker;
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering::Relaxed},
+    Arc, RwLock,
+};
 
 #[derive(Clone, Debug)]
-pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker, Op)>);
+pub struct Tensor(Arc<_Tensor>);
 
+#[derive(Debug)]
+struct _Tensor {
+    grad_id: Option<GradId>,
+    values: RwLock<Vec<f64>>,
+    change_marker: ChangeMarker,
+    op: Op,
+    #[cfg(debug_assertions)]
+    is_logic: AtomicBool,
+}
 impl Tensor {
     #[inline]
     pub fn values(&self) -> &RwLock<Vec<f64>> {
-        &self.0 .1
+        &self.0.values
     }
     #[inline]
     pub fn with_grad(&self) -> bool {
-        self.0 .0.is_some()
+        self.0.grad_id.is_some()
     }
     #[inline]
     fn zeros_like(&self) -> Vec<f64> {
@@ -34,24 +46,36 @@ impl Tensor {
     }
     #[inline]
     fn op(&self) -> &Op {
-        &self.0 .3
+        &self.0.op
     }
     #[inline]
     fn grad_id(&self) -> &Option<GradId> {
-        &self.0 .0
+        &self.0.grad_id
     }
     #[inline]
     fn change_marker(&self) -> &ChangeMarker {
-        &self.0 .2
+        &self.0.change_marker
+    }
+    #[cfg(debug_assertions)]
+    #[inline]
+    fn is_logic(&self) -> bool {
+        self.0.is_logic.load(Relaxed)
+    }
+    #[cfg(debug_assertions)]
+    #[inline]
+    fn mark_logic(&self) {
+        self.0.is_logic.store(true, Relaxed)
     }
     #[inline]
     fn new(grad_id: Option<GradId>, values: Vec<f64>, op: Op) -> Self {
-        Self(Arc::new((
+        Self(Arc::new(_Tensor {
             grad_id,
-            RwLock::new(values),
-            ChangeMarker::new(),
+            values: RwLock::new(values),
+            change_marker: ChangeMarker::new(),
             op,
-        )))
+            #[cfg(debug_assertions)]
+            is_logic: AtomicBool::new(false),
+        }))
     }
 }
 
@@ -162,5 +186,13 @@ impl Expression {
     #[inline]
     pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
         self.recompute().into()
+    }
+    #[cfg(test)]
+    pub fn mark_logic(&self) {
+        #[cfg(debug_assertions)]
+        match self {
+            Expression::Const(_) => todo!(),
+            Expression::Tensor(tensor) => tensor.mark_logic(),
+        }
     }
 }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use super::{
-    op::{BinaryOp, DiscreteBinaryOp, Cond, GradMethod, Powf, UnaryOp},
+    op::{BinaryOp, Cond, DiscreteBinaryOp, GradMethod, Powf, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
 use core::cmp::Ordering;
@@ -121,7 +121,14 @@ impl Expression {
                         binary_op._backward(tensor, lhs, rhs, &mut grads, grad);
                     }
                     Op::DiscreteBinary(lhs, rhs, discrete_binary_op, grad_method) => {
-                        discrete_binary_op._backward(tensor, lhs, rhs, grad_method, &mut grads, grad)
+                        discrete_binary_op._backward(
+                            tensor,
+                            lhs,
+                            rhs,
+                            grad_method,
+                            &mut grads,
+                            grad,
+                        )
                     }
                 }
             }

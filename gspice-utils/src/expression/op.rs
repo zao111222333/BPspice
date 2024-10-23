@@ -5,7 +5,7 @@ use std::{cmp::Ordering, fmt::Debug};
 
 use super::{Expression, GradId, Tensor};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Op {
     /// new assign
     Assgin,
@@ -49,6 +49,23 @@ macro_rules! assert_logic {
     };
 }
 
+macro_rules! assert_logic_tensor {
+    ($tensor:expr) => {
+        #[cfg(debug_assertions)]
+        {
+            assert!($tensor.is_logic(), "ASSERT logic (only in debug mode), if you ensure that is a logic tensor, use `mark_logic` to Expression");
+        }
+    };
+}
+macro_rules! mark_logic_tensor {
+    ($tensor:expr) => {
+        #[cfg(debug_assertions)]
+        {
+            $tensor.mark_logic();
+            $tensor
+        }
+    };
+}
 ////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   Powf   ///////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -86,11 +103,13 @@ impl Cond {
     ///
     /// smoothing method:
     /// `cond*on_true + (1-cond)*on_false`
+    #[inline]
     pub(super) fn forward(cond: &f64, on_true: f64, on_false: f64) -> f64 {
         assert_logic!(*cond);
         cond * on_true + (1.0 - cond) * on_false
     }
     /// $\frac{\partial L}{\partial a} = \frac{\partial L}{\partial e} \cdot \frac{\partial e}{\partial a} = \text{grad\_output} \times (b - c)$
+    #[inline]
     pub(super) fn backward_cond(
         _cond: &f64,
         on_true: &f64,
@@ -100,6 +119,7 @@ impl Cond {
     ) {
         *cond_grad += grad * (on_true - on_false);
     }
+    #[inline]
     pub(super) fn backward_on_true(
         cond: &f64,
         _on_true: &f64,
@@ -109,6 +129,7 @@ impl Cond {
     ) {
         *on_true_grad += cond * grad;
     }
+    #[inline]
     pub(super) fn backward_on_false(
         cond: &f64,
         _on_true: &f64,
@@ -118,8 +139,7 @@ impl Cond {
     ) {
         *on_false_grad += (1.0 - cond) * grad;
     }
-}
-impl Cond {
+    #[inline]
     pub(super) fn iter_tensor_x_x(
         cond_tensor: &Tensor,
         on_true_x: f64,
@@ -133,6 +153,7 @@ impl Cond {
             .map(|cond_x| Cond::forward(cond_x, on_true_x, on_false_x))
             .collect()
     }
+    #[inline]
     pub(super) fn iter_tensor_x_tensor(
         cond_tensor: &Tensor,
         on_true_x: f64,
@@ -145,6 +166,7 @@ impl Cond {
         .map(|(cond_x, on_false_x)| Cond::forward(cond_x, on_true_x, *on_false_x))
         .collect()
     }
+    #[inline]
     pub(super) fn iter_tensor_tensor_x(
         cond_tensor: &Tensor,
         on_true_tensor: &Tensor,
@@ -157,6 +179,7 @@ impl Cond {
         .map(|(cond_x, on_true_x)| Cond::forward(cond_x, *on_true_x, on_false_x))
         .collect()
     }
+    #[inline]
     pub(super) fn iter_tensor_tensor_tensor(
         cond_tensor: &Tensor,
         on_true_tensor: &Tensor,
@@ -177,6 +200,10 @@ impl Expression {
     /// `cond*on_true + (1-cond)*on_false`
     #[inline]
     pub fn cond(&self, on_true: &Self, on_false: &Self) -> Self {
+        #[cfg(debug_assertions)]
+        if let Self::Tensor(cond_tensor) = self {
+            assert_logic_tensor!(cond_tensor);
+        }
         match (self, on_true, on_false) {
             (Self::Const(cond_x), Self::Const(on_true_x), Self::Const(on_false_x)) => {
                 Self::Const(Cond::forward(cond_x, *on_true_x, *on_false_x))
@@ -276,10 +303,68 @@ impl Expression {
 ////////////////////////////////////////////////////////////////////////////////////////////
 #[derive(Clone, Copy, Debug)]
 pub enum DiscreteUnaryOp {
+    /// ``` text
+    ///            __/
+    ///         __/
+    ///      __/
+    /// ____/          0
+    /// --------------->
+    ///                x
+    /// ```
     Ceil,
+    /// ``` text
+    ///            __/
+    ///         __/
+    ///      __/
+    /// ____/          0
+    /// --------------->
+    ///                x
+    /// ```
     Floor,
+    /// ``` text
+    ///            __/
+    ///         __/
+    ///      __/
+    /// ____/          0
+    /// --------------->
+    ///                x
+    /// ```
     Round,
+    /// ``` text
+    ///         _____  1
+    ///        /
+    ///       /        0
+    ///      /
+    /// ____/         -1
+    /// --------------->
+    ///        0       x
+    /// ```
     Sign,
+    /// penalty
+    /// ``` text
+    ///           /    slop = factor
+    ///         /
+    ///       /
+    /// ____/          0
+    /// --------------->
+    ///   th           x
+    /// ```
+    Lt(Constraint),
+    /// penalty
+    /// ``` text
+    ///   \            slop = -factor
+    ///     \          
+    ///       \
+    ///         \___   0
+    /// --------------->
+    ///          th    x
+    /// ```
+    Gt(Constraint),
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Constraint {
+    threshold: f64,
+    factor: f64,
 }
 #[derive(Clone, Copy, Debug)]
 pub enum UnaryOp {
@@ -304,6 +389,14 @@ pub enum UnaryOp {
 
 trait UnaryOpT {
     const OP: UnaryOp;
+    #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        _ = tensor;
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        tensor
+    }
     fn forward(x: f64) -> f64;
     fn backward(x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64);
 }
@@ -534,6 +627,14 @@ struct LogicNot;
 impl UnaryOpT for LogicNot {
     const OP: UnaryOp = UnaryOp::LogicNot;
     #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        assert_logic_tensor!(tensor);
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        mark_logic_tensor!(tensor)
+    }
+    #[inline]
     fn forward(x: f64) -> f64 {
         assert_logic!(x);
         1.0 - x
@@ -692,9 +793,13 @@ impl Expression {
     fn unary_op<T: UnaryOpT>(&self) -> Self {
         match self {
             Self::Const(x) => Self::Const(T::forward(*x)),
-            Self::Tensor(tensor) => Self::Tensor(
-                tensor.unary_op(T::forward, Op::Unary(Self::Tensor(tensor.clone()), T::OP)),
-            ),
+            Self::Tensor(tensor) => {
+                T::debug_assertions(tensor);
+                Self::Tensor(T::debug_mark(tensor.unary_op(
+                    T::forward,
+                    Op::Unary(Self::Tensor(tensor.clone()), T::OP),
+                )))
+            }
         }
     }
 }
@@ -824,10 +929,10 @@ impl DiscreteBinaryOp {
 
 pub(super) trait GradMethodT: Debug + Clone {
     // TODO:
-    fn sign_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
-    fn ceil_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
-    fn floor_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
-    fn round_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
+    fn sign_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {}
+    fn ceil_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {}
+    fn floor_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {}
+    fn round_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64) {}
     fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
     fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
     fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
@@ -1151,6 +1256,14 @@ impl GradMethodT for GradMethodSigmoid {
 
 pub(crate) trait DiscreteBinaryOpT {
     const OP: DiscreteBinaryOp;
+    #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        _ = tensor;
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        mark_logic_tensor!(tensor)
+    }
     fn forward(lhs: f64, rhs: f64) -> f64;
     fn forward_iter<'a>(iter: impl Iterator<Item = (&'a f64, &'a f64)>) -> Vec<f64> {
         iter.map(|(lhs, rhs)| Self::forward(*lhs, *rhs)).collect()
@@ -1346,16 +1459,21 @@ impl Expression {
 impl Expression {
     /// GradMethod only activate in gradient mode
     #[inline]
-    fn discrete_binary_op<T: DiscreteBinaryOpT>(&self, rhs: &Self, grad_method: GradMethod) -> Self {
+    fn discrete_binary_op<T: DiscreteBinaryOpT>(
+        &self,
+        rhs: &Self,
+        grad_method: GradMethod,
+    ) -> Self {
         match (self, rhs) {
             (Self::Const(lhs_x), Self::Const(rhs_x)) => Self::Const(T::forward(*lhs_x, *rhs_x)),
             (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
+                T::debug_assertions(rhs_tensor);
                 let grad_id = if rhs_tensor.with_grad() {
                     Some(GradId::new())
                 } else {
                     None
                 };
-                Self::Tensor(Tensor::new(
+                Self::Tensor(T::debug_mark(Tensor::new(
                     grad_id,
                     T::forward_iter_fix_lhs(*lhs_x, rhs_tensor.values().read().unwrap().iter()),
                     Op::DiscreteBinary(
@@ -1364,15 +1482,16 @@ impl Expression {
                         T::OP,
                         grad_method,
                     ),
-                ))
+                )))
             }
             (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
+                T::debug_assertions(lhs_tensor);
                 let grad_id = if lhs_tensor.with_grad() {
                     Some(GradId::new())
                 } else {
                     None
                 };
-                Self::Tensor(Tensor::new(
+                Self::Tensor(T::debug_mark(Tensor::new(
                     grad_id,
                     T::forward_iter_fix_rhs(*rhs_x, lhs_tensor.values().read().unwrap().iter()),
                     Op::DiscreteBinary(
@@ -1381,15 +1500,17 @@ impl Expression {
                         T::OP,
                         grad_method,
                     ),
-                ))
+                )))
             }
             (Self::Tensor(lhs_tensor), Self::Tensor(rhs_tensor)) => {
+                T::debug_assertions(lhs_tensor);
+                T::debug_assertions(rhs_tensor);
                 let grad_id = if lhs_tensor.with_grad() || rhs_tensor.with_grad() {
                     Some(GradId::new())
                 } else {
                     None
                 };
-                Self::Tensor(Tensor::new(
+                Self::Tensor(T::debug_mark(Tensor::new(
                     grad_id,
                     T::forward_iter(izip!(
                         lhs_tensor.values().read().unwrap().iter(),
@@ -1401,7 +1522,7 @@ impl Expression {
                         T::OP,
                         grad_method,
                     ),
-                ))
+                )))
             }
         }
     }
@@ -1426,6 +1547,14 @@ pub enum BinaryOp {
 
 trait BinaryOpT {
     const OP: BinaryOp;
+    #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        _ = tensor;
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        tensor
+    }
     fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64;
     fn forward_rhs_lhs(rhs: f64, lhs: f64) -> f64;
     fn backward_lhs(lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
@@ -1435,6 +1564,14 @@ trait BinaryOpT {
 struct LogicAnd;
 impl BinaryOpT for LogicAnd {
     const OP: BinaryOp = BinaryOp::LogicAnd;
+    #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        assert_logic_tensor!(tensor);
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        mark_logic_tensor!(tensor)
+    }
     #[inline]
     fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         assert_logic!(lhs);
@@ -1461,6 +1598,14 @@ impl BinaryOpT for LogicAnd {
 struct LogicOr;
 impl BinaryOpT for LogicOr {
     const OP: BinaryOp = BinaryOp::LogicOr;
+    #[inline]
+    fn debug_assertions(tensor: &Tensor) {
+        assert_logic_tensor!(tensor);
+    }
+    #[inline]
+    fn debug_mark(tensor: Tensor) -> Tensor {
+        mark_logic_tensor!(tensor)
+    }
     #[inline]
     fn forward_lhs_rhs(lhs: f64, rhs: f64) -> f64 {
         assert_logic!(lhs);
@@ -1723,7 +1868,7 @@ impl Tensor {
     pub(super) fn iter_binary_op(&self, rhs: &Self, forward: fn(f64, f64) -> f64) -> Vec<f64> {
         let self_vec = self.values().read().unwrap();
         let rhs_vec = rhs.values().read().unwrap();
-        assert_eq!(rhs_vec.len(), self_vec.len(), "tensor length mismatch!");
+        debug_assert_eq!(rhs_vec.len(), self_vec.len(), "tensor length mismatch!");
         self_vec
             .iter()
             .zip(rhs_vec.iter())
@@ -1820,21 +1965,25 @@ impl Expression {
                 Self::Const(T::forward_lhs_rhs(*lhs_x, *rhs_x))
             }
             (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
-                Self::Tensor(rhs_tensor.broadcast_binary_op(
+                T::debug_assertions(rhs_tensor);
+                Self::Tensor(T::debug_mark(rhs_tensor.broadcast_binary_op(
                     *lhs_x,
                     T::forward_rhs_lhs,
                     Op::Binary(Self::Const(*lhs_x), Self::Tensor(rhs_tensor.clone()), T::OP),
-                ))
+                )))
             }
             (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
-                Self::Tensor(lhs_tensor.broadcast_binary_op(
+                T::debug_assertions(lhs_tensor);
+                Self::Tensor(T::debug_mark(lhs_tensor.broadcast_binary_op(
                     *rhs_x,
                     T::forward_lhs_rhs,
                     Op::Binary(Self::Tensor(lhs_tensor.clone()), Self::Const(*rhs_x), T::OP),
-                ))
+                )))
             }
             (Self::Tensor(lhs_tensor), Self::Tensor(rhs_tensor)) => {
-                Self::Tensor(lhs_tensor.binary_op(
+                T::debug_assertions(lhs_tensor);
+                T::debug_assertions(rhs_tensor);
+                Self::Tensor(T::debug_mark(lhs_tensor.binary_op(
                     rhs_tensor,
                     T::forward_lhs_rhs,
                     Op::Binary(
@@ -1842,7 +1991,7 @@ impl Expression {
                         Self::Tensor(rhs_tensor.clone()),
                         T::OP,
                     ),
-                ))
+                )))
             }
         }
     }

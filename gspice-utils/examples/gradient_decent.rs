@@ -23,12 +23,8 @@ fn main() {
         let df_dx = grads.get(&x_ref).unwrap();
         let df_dy = grads.get(&y_ref).unwrap();
         before_update();
-        x_ref.update_callback(&df_dx, |d: &f64| {
-            - step*d
-        });
-        y_ref.update_callback(&df_dy, |d: &f64| {
-            - step*d
-        });
+        x_ref.update_callback(&df_dx, |d: &f64| -step * d);
+        y_ref.update_callback(&df_dy, |d: &f64| -step * d);
     }
     let loss = f.value().overall_sum();
     println!("iter {iter}; loss = x^2+y^2 = {loss:5e}");
