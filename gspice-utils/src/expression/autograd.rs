@@ -1,5 +1,4 @@
 use itertools::izip;
-use pyo3::prelude::*;
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{Deref, DerefMut},
@@ -7,26 +6,16 @@ use std::{
 };
 
 use super::{
-    op::{BinaryOp, CmpMethod, CmpOp, Cond, Powf, UnaryOp},
+    op::{BinaryOp, DiscreteBinaryOp, Cond, GradMethod, Powf, UnaryOp},
     Expression, Op, Tensor, TensorRef,
 };
 use core::cmp::Ordering;
 
 #[derive(Debug)]
-#[pyclass]
 pub struct Grad(pub(super) Vec<f64>);
 impl Grad {
     pub fn inner(self) -> Vec<f64> {
         self.0
-    }
-}
-#[pymethods]
-impl Grad {
-    fn value(&self) -> Vec<f64> {
-        self.0.clone()
-    }
-    fn __repr__(&self) -> String {
-        self.to_string()
     }
 }
 
@@ -65,7 +54,6 @@ impl GradId {
 }
 
 /// A store for gradients, associating a scalar id to the corresponding gradient scalar, used for back propagation.
-#[pyclass]
 #[derive(Debug)]
 pub struct GradStore(HashMap<GradId, Grad>);
 
@@ -84,7 +72,7 @@ impl Expression {
                             on_false.grad_walk(already_seen);
                         }
                         Op::Unary(node, _) => node.grad_walk(already_seen),
-                        Op::Binary(lhs, rhs, _) | Op::Cmp(lhs, rhs, _, _) => {
+                        Op::Binary(lhs, rhs, _) | Op::DiscreteBinary(lhs, rhs, _, _) => {
                             lhs.grad_walk(already_seen);
                             rhs.grad_walk(already_seen);
                         }
@@ -104,7 +92,6 @@ impl Expression {
     }
 }
 
-#[pymethods]
 impl Expression {
     /// When you update the compute graph's tensor value.
     /// You need [self.value](Expression::value) before
@@ -133,26 +120,14 @@ impl Expression {
                     Op::Binary(lhs, rhs, binary_op) => {
                         binary_op._backward(tensor, lhs, rhs, &mut grads, grad);
                     }
-                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => {
-                        cmp_op._backward(tensor, lhs, rhs, cmp_method, &mut grads, grad)
+                    Op::DiscreteBinary(lhs, rhs, discrete_binary_op, grad_method) => {
+                        discrete_binary_op._backward(tensor, lhs, rhs, grad_method, &mut grads, grad)
                     }
                 }
             }
             grads
         } else {
             GradStore::new()
-        }
-    }
-}
-
-#[pymethods]
-impl GradStore {
-    /// Remove & take the gradient tensor associated with the given tensor-reference
-    pub fn take(&mut self, tensor_ref: &TensorRef) -> Option<Grad> {
-        if let Some(grad_id) = tensor_ref.0.grad_id() {
-            self.0.remove(grad_id)
-        } else {
-            panic!("The tensor is not with gradient")
         }
     }
 }
@@ -167,6 +142,15 @@ impl GradStore {
     pub fn get(&self, tensor_ref: &TensorRef) -> Option<&Grad> {
         if let Some(grad_id) = tensor_ref.0.grad_id() {
             self.0.get(grad_id)
+        } else {
+            panic!("The tensor is not with gradient")
+        }
+    }
+
+    /// Remove & take the gradient tensor associated with the given tensor-reference
+    pub fn remove(&mut self, tensor_ref: &TensorRef) -> Option<Grad> {
+        if let Some(grad_id) = tensor_ref.0.grad_id() {
+            self.0.remove(grad_id)
         } else {
             panic!("The tensor is not with gradient")
         }
@@ -383,13 +367,13 @@ impl Cond {
     }
 }
 
-impl CmpOp {
+impl DiscreteBinaryOp {
     fn _backward(
         &self,
         tensor: &Tensor,
         lhs: &Expression,
         rhs: &Expression,
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         grads: &mut GradStore,
         grad: Grad,
     ) {
@@ -403,7 +387,7 @@ impl CmpOp {
             (Expression::Const(lhs_x), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
                     self.backward_rhs_iter_fix_lhs(
-                        cmp_method,
+                        grad_method,
                         lhs_x,
                         izip!(
                             rhs_tensor.values().read().unwrap().iter(),
@@ -417,7 +401,7 @@ impl CmpOp {
             (Expression::Tensor(lhs_tensor), Expression::Const(rhs_x)) => {
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
                     self.backward_lhs_iter_fix_rhs(
-                        cmp_method,
+                        grad_method,
                         rhs_x,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
@@ -431,7 +415,7 @@ impl CmpOp {
             (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
                 if let Some(rhs_sum_grad) = grads.or_insert(rhs_tensor) {
                     self.backward_rhs_iter(
-                        cmp_method,
+                        grad_method,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
                             rhs_tensor.values().read().unwrap().iter(),
@@ -443,7 +427,7 @@ impl CmpOp {
                 }
                 if let Some(lhs_sum_grad) = grads.or_insert(lhs_tensor) {
                     self.backward_lhs_iter(
-                        cmp_method,
+                        grad_method,
                         izip!(
                             lhs_tensor.values().read().unwrap().iter(),
                             rhs_tensor.values().read().unwrap().iter(),

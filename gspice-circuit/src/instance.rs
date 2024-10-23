@@ -1,4 +1,4 @@
-use gspice_utils::Expression;
+use gspice_utils::expression::Expression;
 
 use crate::node::Node;
 

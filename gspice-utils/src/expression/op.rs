@@ -1,7 +1,6 @@
 use itertools::izip;
 use num_traits::{One, Zero};
 use ordered_float::OrderedFloat;
-use pyo3::prelude::*;
 use std::{cmp::Ordering, fmt::Debug};
 
 use super::{Expression, GradId, Tensor};
@@ -18,34 +17,28 @@ pub enum Op {
     Cond(Expression, Expression, Expression),
     Unary(Expression, UnaryOp),
     Binary(Expression, Expression, BinaryOp),
-    Cmp(Expression, Expression, CmpOp, CmpMethod),
+    DiscreteBinary(Expression, Expression, DiscreteBinaryOp, GradMethod),
+    // DiscreteUnary(Expression, DiscreteUnaryOp, GradMethod),
 }
 
-/// CmpMethod only activate in gradient mode
+/// GradMethod only activate in gradient mode
 #[derive(Clone, Copy, Debug)]
-pub enum CmpMethod {
-    Discret,
-    Linear(CmpMethodLinear),
-    Sigmoid(CmpMethodSigmoid),
+pub enum GradMethod {
+    Discrete,
+    Linear(GradMethodLinear),
+    Sigmoid(GradMethodSigmoid),
 }
 
-impl CmpMethod {
+impl GradMethod {
     #[inline]
     fn new_sigmoid(k: f64) -> Self {
         assert!(k.is_sign_positive());
-        Self::Sigmoid(CmpMethodSigmoid { k })
+        Self::Sigmoid(GradMethodSigmoid { k })
     }
     #[inline]
     fn new_linear(epsilon: f64) -> Self {
         assert!(epsilon.is_sign_positive());
-        Self::Linear(CmpMethodLinear { epsilon })
-    }
-    fn differentiable(&self) -> bool {
-        match self {
-            Self::Discret => CmpMethodDiscret::DIFFERENTIABLE,
-            Self::Linear(_) => CmpMethodLinear::DIFFERENTIABLE,
-            Self::Sigmoid(_) => CmpMethodSigmoid::DIFFERENTIABLE,
-        }
+        Self::Linear(GradMethodLinear { epsilon })
     }
 }
 
@@ -178,7 +171,7 @@ impl Cond {
         .collect()
     }
 }
-#[pymethods]
+
 impl Expression {
     /// smoothing method
     /// `cond*on_true + (1-cond)*on_false`
@@ -281,6 +274,13 @@ impl Expression {
 ////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   UnaryOp   ////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////
+#[derive(Clone, Copy, Debug)]
+pub enum DiscreteUnaryOp {
+    Ceil,
+    Floor,
+    Round,
+    Sign,
+}
 #[derive(Clone, Copy, Debug)]
 pub enum UnaryOp {
     LogicNot,
@@ -615,7 +615,7 @@ impl Tensor {
         )
     }
 }
-#[pymethods]
+
 impl Expression {
     #[inline]
     pub fn neg(&self) -> Self {
@@ -691,8 +691,8 @@ impl Expression {
     #[inline]
     fn unary_op<T: UnaryOpT>(&self) -> Self {
         match self {
-            Expression::Const(x) => Expression::Const(T::forward(*x)),
-            Expression::Tensor(tensor) => Expression::Tensor(
+            Self::Const(x) => Self::Const(T::forward(*x)),
+            Self::Tensor(tensor) => Self::Tensor(
                 tensor.unary_op(T::forward, Op::Unary(Self::Tensor(tensor.clone()), T::OP)),
             ),
         }
@@ -700,11 +700,11 @@ impl Expression {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////   CmpOp   //////////////////////////////////////////////
+//////////////////////////////   DiscreteBinaryOp   /////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum CmpOp {
+pub enum DiscreteBinaryOp {
     Eq,
     Ne,
     Le,
@@ -713,239 +713,213 @@ pub enum CmpOp {
     Gt,
 }
 
-impl CmpOp {
+impl DiscreteBinaryOp {
     #[inline]
     pub(super) fn forward_iter<'a>(
         &self,
-        cmp_method: &CmpMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64)>,
     ) -> Vec<f64> {
         match self {
-            CmpOp::Eq => Eq::forward_iter(cmp_method, iter),
-            CmpOp::Ne => Ne::forward_iter(cmp_method, iter),
-            CmpOp::Le => Le::forward_iter(cmp_method, iter),
-            CmpOp::Ge => Ge::forward_iter(cmp_method, iter),
-            CmpOp::Lt => Lt::forward_iter(cmp_method, iter),
-            CmpOp::Gt => Gt::forward_iter(cmp_method, iter),
+            DiscreteBinaryOp::Eq => Eq::forward_iter(iter),
+            DiscreteBinaryOp::Ne => Ne::forward_iter(iter),
+            DiscreteBinaryOp::Le => Le::forward_iter(iter),
+            DiscreteBinaryOp::Ge => Ge::forward_iter(iter),
+            DiscreteBinaryOp::Lt => Lt::forward_iter(iter),
+            DiscreteBinaryOp::Gt => Gt::forward_iter(iter),
         }
     }
     #[inline]
     pub(super) fn forward_iter_fix_lhs<'a>(
         &self,
-        cmp_method: &CmpMethod,
         lhs: f64,
         rhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
         match self {
-            CmpOp::Eq => Eq::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Ne => Ne::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Le => Le::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Ge => Ge::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Lt => Lt::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Gt => Gt::forward_iter_fix_lhs(cmp_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Eq => Eq::forward_iter_fix_lhs(lhs, rhs_iter),
+            DiscreteBinaryOp::Ne => Ne::forward_iter_fix_lhs(lhs, rhs_iter),
+            DiscreteBinaryOp::Le => Le::forward_iter_fix_lhs(lhs, rhs_iter),
+            DiscreteBinaryOp::Ge => Ge::forward_iter_fix_lhs(lhs, rhs_iter),
+            DiscreteBinaryOp::Lt => Lt::forward_iter_fix_lhs(lhs, rhs_iter),
+            DiscreteBinaryOp::Gt => Gt::forward_iter_fix_lhs(lhs, rhs_iter),
         }
     }
     #[inline]
     pub(super) fn forward_iter_fix_rhs<'a>(
         &self,
-        cmp_method: &CmpMethod,
         rhs: f64,
         lhs_iter: impl Iterator<Item = &'a f64>,
     ) -> Vec<f64> {
         match self {
-            CmpOp::Eq => Eq::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Ne => Ne::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Le => Le::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Ge => Ge::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Lt => Lt::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Gt => Gt::forward_iter_fix_rhs(cmp_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Eq => Eq::forward_iter_fix_rhs(rhs, lhs_iter),
+            DiscreteBinaryOp::Ne => Ne::forward_iter_fix_rhs(rhs, lhs_iter),
+            DiscreteBinaryOp::Le => Le::forward_iter_fix_rhs(rhs, lhs_iter),
+            DiscreteBinaryOp::Ge => Ge::forward_iter_fix_rhs(rhs, lhs_iter),
+            DiscreteBinaryOp::Lt => Lt::forward_iter_fix_rhs(rhs, lhs_iter),
+            DiscreteBinaryOp::Gt => Gt::forward_iter_fix_rhs(rhs, lhs_iter),
         }
     }
     #[inline]
     pub(super) fn backward_lhs_iter<'a>(
         &self,
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
         match self {
-            CmpOp::Eq => Eq::backward_lhs_iter(cmp_method, iter),
-            CmpOp::Ne => Ne::backward_lhs_iter(cmp_method, iter),
-            CmpOp::Le => Le::backward_lhs_iter(cmp_method, iter),
-            CmpOp::Ge => Ge::backward_lhs_iter(cmp_method, iter),
-            CmpOp::Lt => Lt::backward_lhs_iter(cmp_method, iter),
-            CmpOp::Gt => Gt::backward_lhs_iter(cmp_method, iter),
+            DiscreteBinaryOp::Eq => Eq::backward_lhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Ne => Ne::backward_lhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Le => Le::backward_lhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Ge => Ge::backward_lhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Lt => Lt::backward_lhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Gt => Gt::backward_lhs_iter(grad_method, iter),
         }
     }
     #[inline]
     pub(super) fn backward_rhs_iter<'a>(
         &self,
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
         match self {
-            CmpOp::Eq => Eq::backward_rhs_iter(cmp_method, iter),
-            CmpOp::Ne => Ne::backward_rhs_iter(cmp_method, iter),
-            CmpOp::Le => Le::backward_rhs_iter(cmp_method, iter),
-            CmpOp::Ge => Ge::backward_rhs_iter(cmp_method, iter),
-            CmpOp::Lt => Lt::backward_rhs_iter(cmp_method, iter),
-            CmpOp::Gt => Gt::backward_rhs_iter(cmp_method, iter),
+            DiscreteBinaryOp::Eq => Eq::backward_rhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Ne => Ne::backward_rhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Le => Le::backward_rhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Ge => Ge::backward_rhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Lt => Lt::backward_rhs_iter(grad_method, iter),
+            DiscreteBinaryOp::Gt => Gt::backward_rhs_iter(grad_method, iter),
         }
     }
     #[inline]
     pub(super) fn backward_lhs_iter_fix_rhs<'a>(
         &self,
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
         match self {
-            CmpOp::Eq => Eq::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Ne => Ne::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Le => Le::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Ge => Ge::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Lt => Lt::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
-            CmpOp::Gt => Gt::backward_lhs_iter_fix_rhs(cmp_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Eq => Eq::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Ne => Ne::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Le => Le::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Ge => Ge::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Lt => Lt::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
+            DiscreteBinaryOp::Gt => Gt::backward_lhs_iter_fix_rhs(grad_method, rhs, lhs_iter),
         }
     }
     #[inline]
     pub(super) fn backward_rhs_iter_fix_lhs<'a>(
         &self,
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     ) {
         match self {
-            CmpOp::Eq => Eq::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Ne => Ne::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Le => Le::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Ge => Ge::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Lt => Lt::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
-            CmpOp::Gt => Gt::backward_rhs_iter_fix_lhs(cmp_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Eq => Eq::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Ne => Ne::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Le => Le::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Ge => Ge::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Lt => Lt::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
+            DiscreteBinaryOp::Gt => Gt::backward_rhs_iter_fix_lhs(grad_method, lhs, rhs_iter),
         }
     }
 }
 
-pub(super) trait CmpMethodT: Debug + Clone {
-    const DIFFERENTIABLE: bool = false;
-    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64;
+pub(super) trait GradMethodT: Debug + Clone {
+    // TODO:
+    fn sign_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
+    fn ceil_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
+    fn floor_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
+    fn round_backward(&self, x: &f64, res: &f64, grad: &f64, sum_grad: &mut f64){}
+    fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+    fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+    fn le_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn le_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+    #[inline]
+    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        self.le_backward_rhs(lhs, rhs, res, grad, lhs_sum_grad);
+    }
+    #[inline]
+    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        self.le_backward_lhs(lhs, rhs, res, grad, rhs_sum_grad);
+    }
+    fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64);
+    fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64);
+    #[inline]
+    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
+        self.lt_backward_rhs(lhs, rhs, res, grad, lhs_sum_grad);
+    }
+    #[inline]
+    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
+        self.lt_backward_lhs(lhs, rhs, res, grad, rhs_sum_grad);
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GradMethodDiscrete;
+impl GradMethodT for GradMethodDiscrete {
+    #[inline]
     fn eq_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         _ = (lhs, rhs, res, grad, lhs_sum_grad);
     }
+    #[inline]
     fn eq_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         _ = (lhs, rhs, res, grad, rhs_sum_grad);
     }
-    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64;
+    #[inline]
     fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         _ = (lhs, rhs, res, grad, lhs_sum_grad);
     }
+    #[inline]
     fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         _ = (lhs, rhs, res, grad, rhs_sum_grad);
     }
-    fn le_forward(&self, lhs: f64, rhs: f64) -> f64;
+    #[inline]
     fn le_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, lhs_sum_grad);
+        _ = res;
+        if OrderedFloat(*lhs).le(&OrderedFloat(*rhs)) {
+            *lhs_sum_grad += grad;
+        }
     }
+    #[inline]
     fn le_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, rhs_sum_grad);
+        _ = res;
+        if OrderedFloat(*lhs).ge(&OrderedFloat(*rhs)) {
+            *rhs_sum_grad += grad;
+        }
     }
-    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64;
-    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, rhs_sum_grad);
-    }
-    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64;
+    #[inline]
     fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, lhs_sum_grad);
+        _ = res;
+        if OrderedFloat(*lhs).lt(&OrderedFloat(*rhs)) {
+            *lhs_sum_grad += grad;
+        }
     }
+    #[inline]
     fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, rhs_sum_grad);
-    }
-    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64;
-    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        _ = (lhs, rhs, res, grad, rhs_sum_grad);
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CmpMethodDiscret;
-impl CmpMethodT for CmpMethodDiscret {
-    #[inline]
-    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).eq(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-    #[inline]
-    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).ne(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-    #[inline]
-    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).le(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-    #[inline]
-    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).ge(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-    #[inline]
-    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).lt(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-    #[inline]
-    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        if OrderedFloat(lhs).gt(&OrderedFloat(rhs)) {
-            1.0
-        } else {
-            0.0
+        _ = res;
+        if OrderedFloat(*lhs).gt(&OrderedFloat(*rhs)) {
+            *rhs_sum_grad += grad;
         }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CmpMethodLinear {
+pub struct GradMethodLinear {
     epsilon: f64,
 }
 
-impl CmpMethodT for CmpMethodLinear {
-    const DIFFERENTIABLE: bool = true;
-    /// $$
-    /// \text{Eq}_{\text{linear}}(a, b, \epsilon) = \begin{cases}
-    /// 1 - \frac{|a - b|}{\epsilon} & \text{if } |a - b| < \epsilon \\
-    /// 0 & \text{otherwise}
-    /// \end{cases}
-    /// $$
-    #[inline]
-    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        let abs = (lhs - rhs).abs();
-        if OrderedFloat(abs) < OrderedFloat(self.epsilon) {
-            1.0 - abs / self.epsilon
-        } else {
-            0.0
-        }
-    }
+impl GradMethodT for GradMethodLinear {
+    /// `1 - |a - b|/ε`    when  `|a - b| < ε`
+    /// ``` text
+    ///                1
+    ///       /\       
+    ///      /  \
+    /// ____/    \___  0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// $$
     /// \frac{\partial \text{Eq}_{\text{linear}}}{\partial a} = \begin{cases}
     /// -\frac{\text{sign}(a - b)}{\epsilon} & \text{if } |a - b| < \epsilon \\
@@ -958,6 +932,17 @@ impl CmpMethodT for CmpMethodLinear {
             *lhs_sum_grad -= grad * (lhs - rhs).signum() / self.epsilon;
         }
     }
+    /// `1 - |a - b|/ε`    when  `|a - b| < ε`
+    /// ``` text
+    ///                1
+    ///       /\       
+    ///      /  \
+    /// ____/    \___  0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// $$
     /// \frac{\partial \text{Eq}_{\text{linear}}}{\partial b} = \begin{cases}
     /// \frac{\text{sign}(a - b)}{\epsilon} & \text{if } |a - b| < \epsilon \\
@@ -970,16 +955,17 @@ impl CmpMethodT for CmpMethodLinear {
             *rhs_sum_grad += grad * (lhs - rhs).signum() / self.epsilon;
         }
     }
-    /// 1-eq
-    #[inline]
-    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        let abs = (lhs - rhs).abs();
-        if OrderedFloat(abs) < OrderedFloat(self.epsilon) {
-            abs / self.epsilon
-        } else {
-            1.0
-        }
-    }
+    /// |`a - b|/ε`    when  `|a - b| < ε`
+    /// ``` text
+    /// ___      ____    1
+    ///    \    /        
+    ///     \  /
+    ///      \/          0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// -eq
     #[inline]
     fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
@@ -987,6 +973,17 @@ impl CmpMethodT for CmpMethodLinear {
             *lhs_sum_grad += grad * (lhs - rhs).signum() / self.epsilon;
         }
     }
+    /// |`a - b|/ε`    when  `|a - b| < ε`
+    /// ``` text
+    /// ___      ____    1
+    ///    \    /        
+    ///     \  /
+    ///      \/          0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// -eq
     #[inline]
     fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
@@ -994,25 +991,17 @@ impl CmpMethodT for CmpMethodLinear {
             *rhs_sum_grad -= grad * (lhs - rhs).signum() / self.epsilon;
         }
     }
-    /// $$
-    /// \text{Lt}_{\text{linear}}(a, b, \epsilon) = \begin{cases}
-    /// 1 & \text{if } a - b < -\epsilon \\
-    /// \frac{1}{2} - \frac{a - b}{2\epsilon} & \text{if } |a - b| \leq \epsilon \\
-    /// 0 & \text{if } a - b > \epsilon
-    /// \end{cases}
-    /// $$
-    #[inline]
-    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        let diff = lhs - rhs;
-        if OrderedFloat(diff) > OrderedFloat(self.epsilon) {
-            0.0
-        } else if OrderedFloat(diff) < OrderedFloat(-self.epsilon) {
-            1.0
-        } else {
-            0.5 - diff / (2.0 * self.epsilon)
-        }
-    }
-
+    /// `1/2 - (a-b)/2ε`    when  `|a - b| < ε`
+    /// ``` text
+    /// ____           1
+    ///     \          
+    ///       \
+    ///         \___   0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// $$
     /// \frac{\partial \text{Lt}_{\text{linear}}}{\partial a} = \begin{cases}
     /// 0 & \text{if } |a - b| > \epsilon \\
@@ -1032,6 +1021,17 @@ impl CmpMethodT for CmpMethodLinear {
             *lhs_sum_grad -= grad / (2.0 * self.epsilon);
         }
     }
+    /// `1/2 - (a-b)/2ε`    when  `|a - b| < ε`
+    /// ``` text
+    /// ____           1
+    ///     \          
+    ///       \
+    ///         \___   0
+    /// --------------->
+    ///   -ε  0  ε     a-b
+    /// ```
+    /// **only activate when graident is required!**
+    ///
     /// $$
     /// \frac{\partial \text{Lt}_{\text{linear}}}{\partial b} = \begin{cases}
     /// 0 & \text{if } |a - b| > \epsilon \\
@@ -1051,56 +1051,20 @@ impl CmpMethodT for CmpMethodLinear {
             *rhs_sum_grad += grad / (2.0 * self.epsilon);
         }
     }
-    #[inline]
-    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.le_forward(rhs, lhs)
-    }
-    #[inline]
-    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        self.le_backward_rhs(lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    #[inline]
-    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        self.le_backward_lhs(lhs, rhs, res, grad, rhs_sum_grad);
-    }
-    #[inline]
-    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.le_forward(lhs, rhs)
-    }
-    #[inline]
     fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         self.le_backward_lhs(lhs, rhs, res, grad, lhs_sum_grad);
     }
-    #[inline]
     fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         self.le_backward_rhs(lhs, rhs, res, grad, rhs_sum_grad);
     }
-    #[inline]
-    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.ge_forward(lhs, rhs)
-    }
-    #[inline]
-    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        self.ge_backward_lhs(lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    #[inline]
-    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        self.ge_backward_rhs(lhs, rhs, res, grad, rhs_sum_grad);
-    }
 }
 #[derive(Clone, Copy, Debug)]
-pub struct CmpMethodSigmoid {
+pub struct GradMethodSigmoid {
     k: f64,
 }
-impl CmpMethodT for CmpMethodSigmoid {
-    const DIFFERENTIABLE: bool = true;
-
-    /// $$\text{Eq}_{\text{sigmoid}}(a, b, k) = e^{-k (a - b)^2}$$
-    #[inline]
-    fn eq_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        let diff = lhs - rhs;
-        (-self.k * diff * diff).exp()
-    }
+impl GradMethodT for GradMethodSigmoid {
+    /// `eq(a,b) = sigmoid(a, b, k) = e^(-k (a - b)^2)`
+    ///
     /// $$ \frac{\partial \text{Eq}_{\text{sigmoid}}}{\partial a} = -2k (a - b) e^{-k (a - b)^2} $$
     #[inline]
     fn eq_backward_lhs(
@@ -1115,7 +1079,8 @@ impl CmpMethodT for CmpMethodSigmoid {
         let kdiff = self.k * diff;
         *lhs_sum_grad -= grad * 2.0 * kdiff * ((-kdiff * diff).exp());
     }
-
+    /// `eq(a,b) = sigmoid(a, b, k) = e^(-k (a - b)^2)`
+    ///
     /// $$\frac{\partial \text{Eq}_{\text{sigmoid}}}{\partial b} = 2k (a - b) e^{-k (a - b)^2}$$
     #[inline]
     fn eq_backward_rhs(
@@ -1130,26 +1095,22 @@ impl CmpMethodT for CmpMethodSigmoid {
         let kdiff = self.k * diff;
         *rhs_sum_grad += grad * 2.0 * kdiff * ((-kdiff * diff).exp());
     }
-    /// 1-eq
-    #[inline]
-    fn ne_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        1.0 - self.eq_forward(lhs, rhs)
-    }
+    /// `ne(a,b) = 1- sigmoid(a, b, k) = 1-e^(-k (a - b)^2)`
+    ///
     /// -eq
     #[inline]
     fn ne_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         self.eq_backward_rhs(lhs, rhs, res, grad, lhs_sum_grad);
     }
+    /// `ne(a,b) = 1- sigmoid(a, b, k) = 1-e^(-k (a - b)^2)`
+    ///
     /// -eq
     #[inline]
     fn ne_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         self.eq_backward_lhs(lhs, rhs, res, grad, rhs_sum_grad);
     }
-    /// $$\text{Lt}_{\text{sigmoid}}(a, b, k) = \sigma(-k (a - b)) = \frac{1}{1 + e^{k(a - b)}}$$
-    #[inline]
-    fn le_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        1.0 / (1.0 + (self.k * (lhs - rhs)).exp())
-    }
+    /// `le(a,b) = 1 / (1 + e^(k(a - b)))`
+    ///
     /// $$\frac{\partial \text{Lt}_{\text{sigmoid}}}{\partial a} = -k \cdot \sigma(-k(a - b))(1 - \sigma(-k(a - b)))$$
     #[inline]
     fn le_backward_lhs(
@@ -1163,6 +1124,8 @@ impl CmpMethodT for CmpMethodSigmoid {
         let sigma = 1.0 / (1.0 + (self.k * (lhs - rhs)).exp());
         *lhs_sum_grad -= grad * self.k * sigma * (1.0 - sigma);
     }
+    /// `le(a,b) = 1 / (1 + e^(k(a - b)))`
+    ///
     /// $$\frac{\partial \text{Lt}_{\text{sigmoid}}}{\partial b} = k \cdot \sigma(-k(a - b))(1 - \sigma(-k(a - b)))$$
     #[inline]
     fn le_backward_rhs(
@@ -1176,78 +1139,45 @@ impl CmpMethodT for CmpMethodSigmoid {
         let sigma = 1.0 / (1.0 + (self.k * (lhs - rhs)).exp());
         *rhs_sum_grad += grad * self.k * sigma * (1.0 - sigma);
     }
-    /// $$\text{Gt}_{\text{sigmoid}}(a, b, k) = \sigma(k(a - b)) = \frac{1}{1 + e^{-k(a - b)}}$$
-    #[inline]
-    fn ge_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.le_forward(rhs, lhs)
-    }
-    /// $$\frac{\partial \text{Gt}_{\text{sigmoid}}}{\partial a} = k \cdot \sigma(k(a - b))(1 - \sigma(k(a - b)))$$
-    #[inline]
-    fn ge_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        self.le_backward_rhs(lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    #[inline]
-    fn ge_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        self.le_backward_lhs(lhs, rhs, res, grad, rhs_sum_grad);
-    }
-    #[inline]
-    fn lt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.le_forward(lhs, rhs)
-    }
-    #[inline]
+    /// `lt(a,b) = 1 / (1 + e^(k(a - b)))`
     fn lt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
         self.le_backward_lhs(lhs, rhs, res, grad, lhs_sum_grad);
     }
-    #[inline]
+    /// `lt(a,b) = 1 / (1 + e^(k(a - b)))`
     fn lt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
         self.le_backward_rhs(lhs, rhs, res, grad, rhs_sum_grad);
     }
-    #[inline]
-    fn gt_forward(&self, lhs: f64, rhs: f64) -> f64 {
-        self.ge_forward(lhs, rhs)
-    }
-    #[inline]
-    fn gt_backward_lhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, lhs_sum_grad: &mut f64) {
-        self.ge_backward_lhs(lhs, rhs, res, grad, lhs_sum_grad);
-    }
-    #[inline]
-    fn gt_backward_rhs(&self, lhs: &f64, rhs: &f64, res: &f64, grad: &f64, rhs_sum_grad: &mut f64) {
-        self.ge_backward_rhs(lhs, rhs, res, grad, rhs_sum_grad);
-    }
 }
 
-pub(crate) trait CmpOpT {
-    const OP: CmpOp;
-    fn forward(cmp_method: &CmpMethod, lhs: f64, rhs: f64) -> f64;
-    fn forward_iter<'a>(
-        cmp_method: &CmpMethod,
-        iter: impl Iterator<Item = (&'a f64, &'a f64)>,
-    ) -> Vec<f64>;
-    fn forward_iter_fix_lhs<'a>(
-        cmp_method: &CmpMethod,
-        lhs: f64,
-        rhs_iter: impl Iterator<Item = &'a f64>,
-    ) -> Vec<f64>;
-    fn forward_iter_fix_rhs<'a>(
-        cmp_method: &CmpMethod,
-        rhs: f64,
-        lhs_iter: impl Iterator<Item = &'a f64>,
-    ) -> Vec<f64>;
+pub(crate) trait DiscreteBinaryOpT {
+    const OP: DiscreteBinaryOp;
+    fn forward(lhs: f64, rhs: f64) -> f64;
+    fn forward_iter<'a>(iter: impl Iterator<Item = (&'a f64, &'a f64)>) -> Vec<f64> {
+        iter.map(|(lhs, rhs)| Self::forward(*lhs, *rhs)).collect()
+    }
+    #[inline]
+    fn forward_iter_fix_lhs<'a>(lhs: f64, rhs_iter: impl Iterator<Item = &'a f64>) -> Vec<f64> {
+        rhs_iter.map(move |rhs| Self::forward(lhs, *rhs)).collect()
+    }
+    #[inline]
+    fn forward_iter_fix_rhs<'a>(rhs: f64, lhs_iter: impl Iterator<Item = &'a f64>) -> Vec<f64> {
+        lhs_iter.map(move |lhs| Self::forward(*lhs, rhs)).collect()
+    }
     fn backward_lhs_iter<'a>(
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     );
     fn backward_lhs_iter_fix_rhs<'a>(
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         rhs: &f64,
         lhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     );
     fn backward_rhs_iter<'a>(
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a f64, &'a mut f64)>,
     );
     fn backward_rhs_iter_fix_lhs<'a>(
-        cmp_method: &CmpMethod,
+        grad_method: &GradMethod,
         lhs: &f64,
         rhs_iter: impl Iterator<Item = (&'a f64, &'a f64, &'a f64, &'a mut f64)>,
     );
@@ -1260,73 +1190,72 @@ pub(super) struct Ge;
 pub(super) struct Lt;
 pub(super) struct Gt;
 
-#[pymethods]
 impl Expression {
     #[inline]
     pub fn eq(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Eq>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Eq>(rhs, GradMethod::Discrete)
     }
     #[inline]
     pub fn ne(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Ne>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Ne>(rhs, GradMethod::Discrete)
     }
     #[inline]
     pub fn le(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Le>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Le>(rhs, GradMethod::Discrete)
     }
     #[inline]
     pub fn ge(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Ge>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Ge>(rhs, GradMethod::Discrete)
     }
     #[inline]
     pub fn lt(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Lt>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Lt>(rhs, GradMethod::Discrete)
     }
     #[inline]
     pub fn gt(&self, rhs: &Self) -> Self {
-        self.cmp_op::<Gt>(rhs, CmpMethod::Discret)
+        self.discrete_binary_op::<Gt>(rhs, GradMethod::Discrete)
     }
     /// `eq(a,b) = sigmoid(a, b, k) = e^(-k (a - b)^2)`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn eq_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Eq>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Eq>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `ne(a,b) = 1- sigmoid(a, b, k) = 1-e^(-k (a - b)^2)`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn ne_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Ne>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Ne>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `le(a,b) = 1 / (1 + e^(k(a - b)))`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn le_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Le>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Le>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `ge(a,b) = 1 / (1 + e^(-k(a - b)))`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn ge_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Ge>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Ge>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `lt(a,b) = 1 / (1 + e^(k(a - b)))`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn lt_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Lt>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Lt>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `gt(a,b) = 1 / (1 + e^(-k(a - b)))`
     ///
     /// **only activate when graident is required!**
     #[inline]
     pub fn gt_sigmoid(&self, rhs: &Self, k: f64) -> Self {
-        self.cmp_op::<Gt>(rhs, CmpMethod::new_sigmoid(k))
+        self.discrete_binary_op::<Gt>(rhs, GradMethod::new_sigmoid(k))
     }
     /// `1 - |a - b|/ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1340,7 +1269,7 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn eq_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Eq>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Eq>(rhs, GradMethod::new_linear(epsilon))
     }
     /// |`a - b|/ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1354,7 +1283,7 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn ne_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Ne>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Ne>(rhs, GradMethod::new_linear(epsilon))
     }
     /// `1/2 - (a-b)/2ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1368,7 +1297,7 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn le_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Le>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Le>(rhs, GradMethod::new_linear(epsilon))
     }
     /// `1/2 + (a-b)/2ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1382,7 +1311,7 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn ge_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Ge>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Ge>(rhs, GradMethod::new_linear(epsilon))
     }
     /// `1/2 - (a-b)/2ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1396,7 +1325,7 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn lt_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Lt>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Lt>(rhs, GradMethod::new_linear(epsilon))
     }
     /// `1/2 + (a-b)/2ε`    when  `|a - b| < ε`
     /// ``` text
@@ -1410,84 +1339,67 @@ impl Expression {
     /// **only activate when graident is required!**
     #[inline]
     pub fn gt_linear(&self, rhs: &Self, epsilon: f64) -> Self {
-        self.cmp_op::<Gt>(rhs, CmpMethod::new_linear(epsilon))
+        self.discrete_binary_op::<Gt>(rhs, GradMethod::new_linear(epsilon))
     }
 }
 
 impl Expression {
-    /// CmpMethod only activate in gradient mode
+    /// GradMethod only activate in gradient mode
     #[inline]
-    fn cmp_op<T: CmpOpT>(&self, rhs: &Self, cmp_method: CmpMethod) -> Self {
+    fn discrete_binary_op<T: DiscreteBinaryOpT>(&self, rhs: &Self, grad_method: GradMethod) -> Self {
         match (self, rhs) {
-            (Self::Const(lhs_x), Self::Const(rhs_x)) => {
-                Self::Const(T::forward(&CmpMethod::Discret, *lhs_x, *rhs_x))
-            }
+            (Self::Const(lhs_x), Self::Const(rhs_x)) => Self::Const(T::forward(*lhs_x, *rhs_x)),
             (Self::Const(lhs_x), Self::Tensor(rhs_tensor)) => {
-                let (grad_id, cmp_method) = if cmp_method.differentiable() && rhs_tensor.with_grad()
-                {
-                    (Some(GradId::new()), cmp_method)
+                let grad_id = if rhs_tensor.with_grad() {
+                    Some(GradId::new())
                 } else {
-                    (None, CmpMethod::Discret)
+                    None
                 };
                 Self::Tensor(Tensor::new(
                     grad_id,
-                    T::forward_iter_fix_lhs(
-                        &cmp_method,
-                        *lhs_x,
-                        rhs_tensor.values().read().unwrap().iter(),
-                    ),
-                    Op::Cmp(
+                    T::forward_iter_fix_lhs(*lhs_x, rhs_tensor.values().read().unwrap().iter()),
+                    Op::DiscreteBinary(
                         Self::Const(*lhs_x),
                         Self::Tensor(rhs_tensor.clone()),
                         T::OP,
-                        cmp_method,
+                        grad_method,
                     ),
                 ))
             }
             (Self::Tensor(lhs_tensor), Self::Const(rhs_x)) => {
-                let (grad_id, cmp_method) = if cmp_method.differentiable() && lhs_tensor.with_grad()
-                {
-                    (Some(GradId::new()), cmp_method)
+                let grad_id = if lhs_tensor.with_grad() {
+                    Some(GradId::new())
                 } else {
-                    (None, CmpMethod::Discret)
+                    None
                 };
                 Self::Tensor(Tensor::new(
                     grad_id,
-                    T::forward_iter_fix_rhs(
-                        &cmp_method,
-                        *rhs_x,
-                        lhs_tensor.values().read().unwrap().iter(),
-                    ),
-                    Op::Cmp(
+                    T::forward_iter_fix_rhs(*rhs_x, lhs_tensor.values().read().unwrap().iter()),
+                    Op::DiscreteBinary(
                         Self::Tensor(lhs_tensor.clone()),
                         Self::Const(*rhs_x),
                         T::OP,
-                        cmp_method,
+                        grad_method,
                     ),
                 ))
             }
-            (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
-                let (grad_id, cmp_method) = if cmp_method.differentiable()
-                    && (lhs_tensor.with_grad() || rhs_tensor.with_grad())
-                {
-                    (Some(GradId::new()), cmp_method)
+            (Self::Tensor(lhs_tensor), Self::Tensor(rhs_tensor)) => {
+                let grad_id = if lhs_tensor.with_grad() || rhs_tensor.with_grad() {
+                    Some(GradId::new())
                 } else {
-                    (None, CmpMethod::Discret)
+                    None
                 };
                 Self::Tensor(Tensor::new(
                     grad_id,
-                    T::forward_iter(
-                        &cmp_method,
-                        izip!(
-                            lhs_tensor.values().read().unwrap().iter(),
-                            rhs_tensor.values().read().unwrap().iter()
-                        ),
-                    ),
-                    Op::Cmp(
+                    T::forward_iter(izip!(
+                        lhs_tensor.values().read().unwrap().iter(),
+                        rhs_tensor.values().read().unwrap().iter()
+                    )),
+                    Op::DiscreteBinary(
                         Self::Tensor(lhs_tensor.clone()),
                         Self::Tensor(rhs_tensor.clone()),
                         T::OP,
-                        cmp_method,
+                        grad_method,
                     ),
                 ))
             }
@@ -1862,22 +1774,21 @@ impl Tensor {
     }
 }
 
-#[pymethods]
 impl Expression {
     #[inline]
-    pub fn add(&self, rhs: &Expression) -> Expression {
+    pub fn add(&self, rhs: &Self) -> Self {
         self.binary_op::<Add>(rhs)
     }
     #[inline]
-    pub fn sub(&self, rhs: &Expression) -> Expression {
+    pub fn sub(&self, rhs: &Self) -> Self {
         self.binary_op::<Sub>(rhs)
     }
     #[inline]
-    pub fn mul(&self, rhs: &Expression) -> Expression {
+    pub fn mul(&self, rhs: &Self) -> Self {
         self.binary_op::<Mul>(rhs)
     }
     #[inline]
-    pub fn div(&self, rhs: &Expression) -> Expression {
+    pub fn div(&self, rhs: &Self) -> Self {
         self.binary_op::<Div>(rhs)
     }
     #[inline]
@@ -1922,7 +1833,7 @@ impl Expression {
                     Op::Binary(Self::Tensor(lhs_tensor.clone()), Self::Const(*rhs_x), T::OP),
                 ))
             }
-            (Expression::Tensor(lhs_tensor), Expression::Tensor(rhs_tensor)) => {
+            (Self::Tensor(lhs_tensor), Self::Tensor(rhs_tensor)) => {
                 Self::Tensor(lhs_tensor.binary_op(
                     rhs_tensor,
                     T::forward_lhs_rhs,

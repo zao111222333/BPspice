@@ -2,7 +2,6 @@ mod autograd;
 mod impls;
 mod op;
 mod optimizer;
-mod py;
 mod recompute;
 mod test;
 pub use recompute::before_update;
@@ -10,11 +9,9 @@ pub use recompute::before_update;
 use autograd::GradId;
 use num_traits::identities::{One, Zero};
 use op::Op;
-use pyo3::prelude::*;
 use recompute::ChangeMarker;
 use std::sync::{Arc, RwLock};
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct Tensor(Arc<(Option<GradId>, RwLock<Vec<f64>>, ChangeMarker, Op)>);
 
@@ -58,11 +55,9 @@ impl Tensor {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct TensorRef(Tensor);
 
-#[pymethods]
 impl TensorRef {
     /// Need [`before_update`] before calling this
     ///
@@ -75,9 +70,6 @@ impl TensorRef {
         *write = values;
         self.0.change_marker().mark_searched_change();
     }
-}
-
-impl TensorRef {
     /// Need [`before_update`] before calling this
     ///
     /// Need [`Expression::value`](Expression::value) after calling this
@@ -101,7 +93,6 @@ impl TensorRef {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub enum Expression {
     Const(f64),

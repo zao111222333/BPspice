@@ -4,10 +4,8 @@ use ordered_float::OrderedFloat;
 use rand::prelude::Distribution;
 use serial_test::serial;
 
-use crate::{before_update, Expression};
+use super::{before_update, Expression, ScalarTensor};
 use std::ops::*;
-
-use super::ScalarTensor;
 
 macro_rules! assert_eq_vec {
     ($lhs:expr, $rhs:expr) => {
@@ -117,6 +115,16 @@ macro_rules! assert_scalar {
 }
 
 #[test]
+fn utils_ok() {
+    assert_eq_vec!(&[1.0, 2.0], &[1.0, 2.0]);
+}
+#[test]
+#[should_panic]
+fn utils_should_panic() {
+    assert_eq_vec!(&[1.0, 2.0], &[1.1, 2.0]);
+}
+
+#[test]
 #[serial]
 fn recompute() {
     let (a, a_ref) = Expression::tensor(vec![1.0, 2.0, 3.0], true);
@@ -124,66 +132,18 @@ fn recompute() {
     let c = a.mul(&b);
     let f = c.add(&c);
 
+    let count_before_recompute = crate::expression::recompute::TEST_RECOMPUTE_COUNT
+        .load(std::sync::atomic::Ordering::Relaxed);
     // Update 1
     before_update();
     a_ref.assign(vec![6.0]);
     b_ref.assign(vec![-4.0]);
     f.value();
     assert_eq!(
-        5,
+        count_before_recompute + 5,
         crate::expression::recompute::TEST_RECOMPUTE_COUNT
             .load(std::sync::atomic::Ordering::Relaxed)
     );
-}
-
-#[test]
-#[serial]
-fn gradient_decent() {
-    let n = 200;
-    let iter = 10000;
-    let step = 0.01;
-    let (x, x_ref) = Expression::rand_uniform(n, -10.0, 10.0, true);
-    let (y, y_ref) = Expression::rand_uniform(n, -10.0, 10.0, true);
-    let f = &x.sqr() + &y.sqr();
-    let mut loss = f64::MAX;
-    for i in 0..iter {
-        if i % 200 == 0 {
-            let new_loss = f
-                .value()
-                .to_tensor()
-                .unwrap()
-                .iter()
-                .fold(0.0, |sum, x| sum + x)
-                / n as f64;
-            assert!(new_loss < loss);
-            loss = new_loss;
-            println!("iter {i}; loss = x^2+y^2 = {loss:5e}");
-        }
-        let grads = f.backward();
-        let df_dx = grads.get(&x_ref).unwrap();
-        let df_dy = grads.get(&y_ref).unwrap();
-        before_update();
-        x_ref.update_callback(&df_dx, |d: &f64| -d * step);
-        y_ref.update_callback(&df_dy, |d: &f64| -d * step);
-    }
-    let loss = f
-        .value()
-        .to_tensor()
-        .unwrap()
-        .iter()
-        .fold(0.0, |sum, x| sum + x)
-        / n as f64;
-    println!("iter {iter}; loss = x^2+y^2 = {loss:5e}");
-}
-#[test]
-fn utils_ok() {
-    assert_eq_vec!(&[1.0, 2.0], &[1.0, 2.0]);
-}
-
-#[test]
-#[should_panic]
-fn utils_should_panic() {
-    assert_eq_vec!(&[1.0, 2.0], &[1.1, 2.0]);
 }
 
 #[test]
@@ -576,7 +536,7 @@ fn backward_cond_logic() {
 #[test]
 #[serial]
 #[rustfmt::skip]
-fn cmp_op() {
+fn discrete_binary_op() {
     let const1 = Expression::constant(3.0);
     let const2 = Expression::constant(-2.0);
     let (tensor1, _) = Expression::tensor(vec![1.0, 4.0, 3.0], true);

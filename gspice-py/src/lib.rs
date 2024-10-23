@@ -1,3 +1,5 @@
+mod expression;
+
 use pyo3::prelude::*;
 
 /// Formats the sum of two numbers as string.
@@ -14,8 +16,8 @@ struct Ckt {}
 /// import the module.
 #[pymodule(name = "gspice")]
 fn pymodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(gspice::before_update, m)?)?;
+    m.add_function(wrap_pyfunction!(expression::before_update, m)?)?;
+    m.add_class::<expression::Expression>()?;
     m.add_class::<Ckt>()?;
-    m.add_class::<gspice::Expression>()?;
     Ok(())
 }

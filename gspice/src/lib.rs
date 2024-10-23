@@ -1,4 +1,4 @@
-pub use gspice_utils::{before_update, Expression, ScalarTensor, Tensor};
+pub use gspice_utils::expression;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

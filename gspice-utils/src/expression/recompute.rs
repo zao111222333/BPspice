@@ -1,10 +1,9 @@
 use super::{
-    op::{BinaryOp, CmpMethod, CmpOp, Cond, Powf, UnaryOp},
+    op::{BinaryOp, DiscreteBinaryOp, Cond, Powf, UnaryOp},
     Expression, Op, ScalarTensor, Tensor,
 };
 use itertools::izip;
 use num_traits::Zero;
-use pyo3::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 #[cfg(test)]
@@ -29,9 +28,7 @@ impl Expression {
                     }
                     Op::Unary(node, unary_op) => unary_op.recompute(node, tensor),
                     Op::Binary(lhs, rhs, binary_op) => binary_op.recompute(lhs, rhs, tensor),
-                    Op::Cmp(lhs, rhs, cmp_op, cmp_method) => {
-                        cmp_op.recompute(lhs, rhs, cmp_method, tensor)
-                    }
+                    Op::DiscreteBinary(lhs, rhs, discrete_binary_op, _) => discrete_binary_op.recompute(lhs, rhs, tensor),
                 },
             },
         }
@@ -74,7 +71,6 @@ impl<'a> RecomputeScalarTensor<'a> {
 }
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
-#[pyfunction]
 pub fn before_update() {
     // No need async, use Relaxed
     COUNTER.fetch_add(2, Relaxed);
@@ -148,12 +144,11 @@ impl BinaryOp {
     }
 }
 
-impl CmpOp {
+impl DiscreteBinaryOp {
     fn recompute<'a>(
         &self,
         lhs: &Expression,
         rhs: &Expression,
-        cmp_method: &CmpMethod,
         tensor: &'a Tensor,
     ) -> RecomputeScalarTensor<'a> {
         match (lhs.recompute(), rhs.recompute()) {
@@ -169,22 +164,14 @@ impl CmpOp {
                 RecomputeScalarTensor::TensorChanged(rhs_tensor),
             ) => RecomputeScalarTensor::change(
                 tensor,
-                self.forward_iter_fix_lhs(
-                    cmp_method,
-                    *lhs_x,
-                    rhs_tensor.values().read().unwrap().iter(),
-                ),
+                self.forward_iter_fix_lhs(*lhs_x, rhs_tensor.values().read().unwrap().iter()),
             ),
             (
                 RecomputeScalarTensor::TensorChanged(lhs_tensor),
                 RecomputeScalarTensor::Scalar(rhs_x),
             ) => RecomputeScalarTensor::change(
                 tensor,
-                self.forward_iter_fix_rhs(
-                    cmp_method,
-                    *rhs_x,
-                    lhs_tensor.values().read().unwrap().iter(),
-                ),
+                self.forward_iter_fix_rhs(*rhs_x, lhs_tensor.values().read().unwrap().iter()),
             ),
             (
                 RecomputeScalarTensor::TensorChanged(lhs_tensor),
@@ -199,13 +186,10 @@ impl CmpOp {
                 RecomputeScalarTensor::TensorChanged(rhs_tensor),
             ) => RecomputeScalarTensor::change(
                 tensor,
-                self.forward_iter(
-                    cmp_method,
-                    izip!(
-                        lhs_tensor.values().read().unwrap().iter(),
-                        rhs_tensor.values().read().unwrap().iter()
-                    ),
-                ),
+                self.forward_iter(izip!(
+                    lhs_tensor.values().read().unwrap().iter(),
+                    rhs_tensor.values().read().unwrap().iter()
+                )),
             ),
         }
     }
