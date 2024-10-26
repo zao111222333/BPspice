@@ -4,6 +4,7 @@ mod op;
 mod optimizer;
 mod recompute;
 mod test;
+use itertools::zip_eq;
 pub use recompute::before_update;
 
 use autograd::GradId;
@@ -98,21 +99,20 @@ impl TensorRef {
     ///
     /// Need [`Expression::value`](Expression::value) after calling this
     ///
-    /// Tensor += delta
+    /// Tensor\[i\] += delta\[i\]
     #[inline]
     pub fn update(&self, delta: &[f64]) {
-        self.update_callback(delta, |f| *f)
+        self.update_iter(delta.into_iter().map(|d|*d))
     }
     /// Need [`before_update`] before calling this
     ///
     /// Need [`Expression::value`](Expression::value) after calling this
     ///
-    /// Tensor += f(delta)
+    /// Tensor\[i\] += delta_iter\[i\]
     #[inline]
-    pub fn update_callback(&self, delta: &[f64], f: impl Fn(&f64) -> f64) {
+    pub fn update_iter(&self, delta_iter: impl Iterator<Item = f64>) {
         let mut write = self.0.values().write().unwrap();
-        assert_eq!(write.len(), delta.len(), "tensor length mismatch!");
-        write.iter_mut().zip(delta).for_each(|(x, d)| *x += f(d));
+        zip_eq(write.iter_mut(), delta_iter).for_each(|(x, d)| *x += d);
         self.0.change_marker().mark_searched_change();
     }
 }
@@ -187,6 +187,9 @@ impl Expression {
     pub fn value<'a>(&'a self) -> ScalarTensor<'a> {
         self.recompute().into()
     }
+    /// Mark the expression as logic for debug-mode-only logic check
+    ///
+    /// `#[cfg(test)]` This requirement seems only happend in test
     #[cfg(test)]
     pub fn mark_logic(&self) {
         #[cfg(debug_assertions)]

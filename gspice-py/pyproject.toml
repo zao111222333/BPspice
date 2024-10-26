@@ -13,9 +13,9 @@ requires-python = ">=3.7"
 dev = ["pytest"]
 
 [tool.maturin]
-include = [
-#   { path = "path/**/*", format = "sdist" },
-#   { path = "all", format = ["sdist", "wheel"] },
-#   { path = "for/wheel/**/*", format = "wheel" }
-]
-# exclude = [ { path = "**", format = "sdist" } ]
+# include = [
+# #   { path = "path/**/*", format = "sdist" },
+# #   { path = "all", format = ["sdist", "wheel"] },
+# #   { path = "for/wheel/**/*", format = "wheel" }
+# ]
+exclude = ["src/*", "Cargo.toml", "Cargo.lock"]

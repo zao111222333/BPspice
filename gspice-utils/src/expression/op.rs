@@ -58,13 +58,13 @@ macro_rules! assert_logic_tensor {
     };
 }
 macro_rules! mark_logic_tensor {
-    ($tensor:expr) => {
+    ($tensor:expr) => {{
         #[cfg(debug_assertions)]
         {
             $tensor.mark_logic();
-            $tensor
         }
-    };
+        $tensor
+    }};
 }
 ////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   Powf   ///////////////////////////////////////////////
@@ -307,7 +307,7 @@ pub enum DiscreteUnaryOp {
     ///            __/
     ///         __/
     ///      __/
-    /// ____/          0
+    /// ____/          
     /// --------------->
     ///                x
     /// ```
@@ -316,7 +316,7 @@ pub enum DiscreteUnaryOp {
     ///            __/
     ///         __/
     ///      __/
-    /// ____/          0
+    /// ____/          
     /// --------------->
     ///                x
     /// ```
@@ -325,7 +325,7 @@ pub enum DiscreteUnaryOp {
     ///            __/
     ///         __/
     ///      __/
-    /// ____/          0
+    /// ____/          
     /// --------------->
     ///                x
     /// ```
@@ -360,6 +360,26 @@ pub enum DiscreteUnaryOp {
     ///          th    x
     /// ```
     Gt(Constraint),
+    /// penalty
+    /// ``` text
+    ///           /    slop = factor
+    ///         /
+    ///       /
+    /// ____/          0
+    /// --------------->
+    ///   th           x
+    /// ```
+    Le(Constraint),
+    /// penalty
+    /// ``` text
+    ///   \            slop = -factor
+    ///     \          
+    ///       \
+    ///         \___   0
+    /// --------------->
+    ///          th    x
+    /// ```
+    Ge(Constraint),
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Constraint {
